@@ -1,6 +1,6 @@
 APP_VERSION = "0.3"
 APP_STAGE = "Beta"
-APP_BUILD = "2026.4"
+APP_BUILD = "2026.5"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
 import sys
@@ -12,7 +12,6 @@ import ctypes
 
 if not ctypes.windll.shell32.IsUserAnAdmin():
     script_path = os.path.abspath(sys.argv[0])
-
     ctypes.windll.shell32.ShellExecuteW(
         None,
         "runas",
@@ -408,10 +407,8 @@ class Launcher(QMainWindow):
 
             def parse_version(version):
                 app_version, build = version.split("-", 1)
-
                 app_parts = tuple(int(part) for part in app_version.split("."))
                 build_parts = tuple(int(part) for part in build.split("."))
-
                 return app_parts + build_parts
 
             if parse_version(remote_version) > parse_version(APP_FULL_VERSION):
@@ -774,9 +771,8 @@ class Launcher(QMainWindow):
 
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setWindowTitle(" ")
-        self.resize(1022, 650)
-        self.setMinimumSize(1022, 650)
-        self.setMaximumSize(1022, 650)
+        self.resize(1400, 850)
+        self.setMinimumSize(1180, 720)
         
         
         # ===============================
@@ -853,7 +849,7 @@ class Launcher(QMainWindow):
         # SIDEBAR
         # ===============================
         sidebar = QFrame()
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(260)
         sidebar.setObjectName("sidebar")
 
         sidebar.setStyleSheet("""
@@ -861,22 +857,22 @@ class Launcher(QMainWindow):
             background: qlineargradient(
                 x1:0, y1:0,
                 x2:0, y2:1,
-                stop:0 #22222d,
-                stop:0.4 #181820,
-                stop:1 #121219
+                stop:0 #0b1020,
+                stop:0.55 #080d18,
+                stop:1 #060a12
             );
-            border-right: 1px solid #2a2a38;
+            border-right: 1px solid rgba(122, 92, 255, 70);
         }
         """)
 
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setAlignment(Qt.AlignTop)
-        sidebar_layout.setContentsMargins(20, 30, 20, 20)
+        sidebar_layout.setContentsMargins(18, 24, 18, 18)
         sidebar_layout.setSpacing(12)
 
         # ===== LOGO IMAGEN =====
         pixmap = self.get_remote_asset("logo.png").scaled(
-            150, 150,
+            132, 132,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
@@ -902,11 +898,11 @@ class Launcher(QMainWindow):
         # ===== BOTONES =====
 
         menu_items = [
-            ("🏠", "Inicio"),
-            ("🎮", "Servidores"),
-            ("📰", "Noticias"),
+            ("⌂", "Inicio"),
+            ("▤", "Servidores"),
+            ("▦", "Noticias"),
             ("⚙", "Ajustes"),
-            ("❓", "Soporte"),
+            ("◉", "Soporte"),
         ]
 
         buttons = []
@@ -918,16 +914,20 @@ class Launcher(QMainWindow):
             btn.setFont(btn_font)
             btn.setFixedHeight(48)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setProperty("navButton", True)
             btn.setStyleSheet("""
                 QPushButton {
-                    background-color: rgba(20, 20, 28, 200);
-                    color: white;
-                    border-radius: 10px;
+                    background: transparent;
+                    color: #aeb7cc;
+                    border: 1px solid transparent;
+                    border-radius: 12px;
                     text-align: left;
                     padding-left: 18px;
                 }
                 QPushButton:hover {
-                    background-color: rgba(35, 35, 50, 230);
+                    background-color: rgba(91, 108, 255, 28);
+                    color: #ffffff;
+                    border-color: rgba(91, 108, 255, 70);
                 }
             """)
             sidebar_layout.addWidget(btn)
@@ -997,11 +997,11 @@ class Launcher(QMainWindow):
         # MAIN CONTENT CON STACK
         # ===============================
         main_content = QFrame()
-        main_content.setStyleSheet("background-color: #0f0f14;")
+        main_content.setStyleSheet("background-color: #060a12;")
 
         # Layout vertical principal del lado derecho
         content_wrapper = QVBoxLayout(main_content)
-        content_wrapper.setContentsMargins(40, 15, 25, 30)
+        content_wrapper.setContentsMargins(28, 14, 24, 18)
         content_wrapper.setSpacing(0)
 
         # ===============================
@@ -1088,6 +1088,7 @@ class Launcher(QMainWindow):
         self.stack.addWidget(self.support_page)
         self.refresh_server_buttons()
         self.auto_detect_paths()
+        self.switch_page(0)
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(main_content)
@@ -1308,71 +1309,147 @@ class Launcher(QMainWindow):
     # ===============================
     def create_home_page(self):
         page = QWidget()
+        page.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(page)
-        layout.setSpacing(15)
-        layout.setContentsMargins(40, 20, 40, 30)
+        layout.setSpacing(18)
+        layout.setContentsMargins(4, 8, 4, 8)
 
-        title = QLabel("Nuestros Servidores")
-        title.setFont(QFont(self.montserrat, 16))
-        title.setStyleSheet("color: white;")
-        layout.addWidget(title)
-
-        cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(50)
-        cards_layout.setAlignment(Qt.AlignLeft)
-        for server_name, data in self.servers_data.items():
-            pixmap = self.get_remote_pixmap(data.get("image_url"))
-
-            card = ServerCard(
-                server_name,
-                data["description"],
-                self.montserrat,
-                pixmap,
-                data.get("installed", False),
-                self.handle_server_action
-            )   
-            cards_layout.addWidget(card)
-        layout.addLayout(cards_layout)
-
-        layout.addSpacing(20)
-
-        # ===============================
-        # HEADER NOTICIAS (con botón)
-        # ===============================
-        news_header = QHBoxLayout()
-
-        news_title = QLabel("Última noticia")
-        news_title.setFont(QFont(self.montserrat, 14))
-        news_title.setStyleSheet("color: white;")
-
-        more_news_btn = QPushButton("Más noticias →")
-        more_news_btn.setCursor(Qt.PointingHandCursor)
-        more_news_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #ff2d55;
-                font-weight: bold;
-                border: none;
-            }
-            QPushButton:hover {
-                color: #ff4d6d;
+        # HERO PRINCIPAL
+        hero = QFrame()
+        hero.setMinimumHeight(330)
+        hero.setObjectName("hero")
+        hero.setStyleSheet("""
+            #hero {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(12, 20, 42, 245),
+                    stop:0.55 rgba(18, 24, 55, 230),
+                    stop:1 rgba(36, 20, 70, 225));
+                border: 1px solid rgba(91, 108, 255, 85);
+                border-radius: 18px;
             }
         """)
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(42, 34, 34, 30)
+        hero_layout.setSpacing(26)
 
-        # Cambia a la pestaña Noticias (index 2)
-        more_news_btn.clicked.connect(lambda: self.stack.setCurrentIndex(2))
+        hero_text = QVBoxLayout()
+        hero_text.setSpacing(8)
+        eyebrow = QLabel("D0CCTOR'S HUB")
+        eyebrow.setStyleSheet("color:#7f8cff; font-size:12px; font-weight:700; letter-spacing:2px;")
+        title = QLabel("EXPLORÁ.\nCONSTRUÍ.\n<span style='color:#6d78ff'>SOBREVIVÍ.</span>")
+        title.setTextFormat(Qt.RichText)
+        title.setFont(QFont(self.montserrat, 29, QFont.Weight.Bold))
+        title.setStyleSheet("color:white;")
+        subtitle = QLabel("Entrá a nuestros servidores, instalá modpacks y mantené todo actualizado desde un solo lugar.")
+        subtitle.setWordWrap(True)
+        subtitle.setMaximumWidth(500)
+        subtitle.setStyleSheet("color:#aeb7cc; font-size:13px;")
 
+        hero_buttons = QHBoxLayout()
+        play_btn = QPushButton("▶   JUGAR")
+        play_btn.setFixedSize(190, 58)
+        play_btn.setCursor(Qt.PointingHandCursor)
+        play_btn.setStyleSheet("""
+            QPushButton { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4d5cff,stop:1 #765cff); color:white; border:none; border-radius:14px; font-size:16px; font-weight:700; }
+            QPushButton:hover { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6370ff,stop:1 #8b72ff); }
+        """)
+        install_btn = QPushButton("⇩   SERVIDORES")
+        install_btn.setFixedSize(190, 58)
+        install_btn.setCursor(Qt.PointingHandCursor)
+        install_btn.setStyleSheet("""
+            QPushButton { background:rgba(8,12,24,180); color:#e8ebf5; border:1px solid rgba(255,255,255,35); border-radius:14px; font-size:14px; font-weight:650; }
+            QPushButton:hover { border-color:#6875ff; background:rgba(31,39,74,210); }
+        """)
+        play_btn.clicked.connect(lambda: self.switch_page(1))
+        install_btn.clicked.connect(lambda: self.switch_page(1))
+        hero_buttons.addWidget(play_btn)
+        hero_buttons.addWidget(install_btn)
+        hero_buttons.addStretch()
+
+        hero_text.addWidget(eyebrow)
+        hero_text.addWidget(title)
+        hero_text.addWidget(subtitle)
+        hero_text.addSpacing(10)
+        hero_text.addLayout(hero_buttons)
+        hero_text.addStretch()
+        hero_layout.addLayout(hero_text, 3)
+
+        visual = QLabel()
+        hero_pixmap = self.get_remote_asset("minecraft.png")
+        if hero_pixmap and not hero_pixmap.isNull():
+            visual.setPixmap(hero_pixmap.scaled(310, 270, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        visual.setAlignment(Qt.AlignCenter)
+        visual.setStyleSheet("background:rgba(5,8,16,90); border:1px solid rgba(255,255,255,22); border-radius:16px;")
+        hero_layout.addWidget(visual, 2)
+        layout.addWidget(hero)
+
+        # ESTADO Y SERVIDORES DESTACADOS
+        section_header = QHBoxLayout()
+        status_dot = QLabel("●")
+        status_dot.setStyleSheet("color:#49d17d; font-size:14px;")
+        section_title = QLabel("ESTADO DE SERVIDORES")
+        section_title.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
+        section_title.setStyleSheet("color:#f2f5ff; letter-spacing:1px;")
+        all_btn = QPushButton("VER TODOS  ›")
+        all_btn.setCursor(Qt.PointingHandCursor)
+        all_btn.setStyleSheet("QPushButton{background:#0d1424;color:#c7cee0;border:1px solid rgba(255,255,255,25);border-radius:9px;padding:8px 15px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        all_btn.clicked.connect(lambda: self.switch_page(1))
+        section_header.addWidget(status_dot)
+        section_header.addWidget(section_title)
+        section_header.addStretch()
+        section_header.addWidget(all_btn)
+        layout.addLayout(section_header)
+
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(12)
+        for server_name, data in list(self.servers_data.items())[:4]:
+            card = QFrame()
+            card.setMinimumHeight(112)
+            card.setStyleSheet("QFrame{background:#0d1421;border:1px solid rgba(255,255,255,22);border-radius:14px;} QFrame:hover{border-color:rgba(91,108,255,95);}")
+            card_layout = QHBoxLayout(card)
+            card_layout.setContentsMargins(14, 13, 14, 13)
+            image = QLabel()
+            pixmap = self.get_remote_pixmap(data.get("image_url"))
+            if pixmap and not pixmap.isNull():
+                image.setPixmap(pixmap.scaled(68, 68, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
+            image.setFixedSize(68,68)
+            image.setAlignment(Qt.AlignCenter)
+            image.setStyleSheet("background:#111a2d;border-radius:12px;")
+            text = QVBoxLayout()
+            name = QLabel(server_name)
+            name.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
+            name.setStyleSheet("color:white;")
+            version = QLabel(str(data.get("minecraft_version") or "Steam"))
+            version.setStyleSheet("color:#7f899f;font-size:11px;")
+            state = QLabel("●  Disponible")
+            state.setStyleSheet("color:#49d17d;font-size:11px;font-weight:650;")
+            text.addWidget(name)
+            text.addWidget(version)
+            text.addStretch()
+            text.addWidget(state)
+            card_layout.addWidget(image)
+            card_layout.addLayout(text)
+            cards_layout.addWidget(card, 1)
+        layout.addLayout(cards_layout)
+
+        # NOTICIA DESTACADA
+        news_header = QHBoxLayout()
+        news_title = QLabel("NOTICIAS DESTACADAS")
+        news_title.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
+        news_title.setStyleSheet("color:#f2f5ff; letter-spacing:1px;")
+        more_news_btn = QPushButton("VER TODAS  ›")
+        more_news_btn.setCursor(Qt.PointingHandCursor)
+        more_news_btn.setStyleSheet("QPushButton{background:#0d1424;color:#c7cee0;border:1px solid rgba(255,255,255,25);border-radius:9px;padding:8px 15px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        more_news_btn.clicked.connect(lambda: self.switch_page(2))
         news_header.addWidget(news_title)
         news_header.addStretch()
         news_header.addWidget(more_news_btn)
-
         layout.addLayout(news_header)
-
         latest = self.news_data[0] if self.news_data else None
-
         if latest:
-            layout.addWidget(self.create_news_card(latest))
-
+            news_card = self.create_news_card(latest)
+            news_card.setMaximumHeight(220)
+            layout.addWidget(news_card)
         layout.addStretch(1)
         return page
 
@@ -2096,6 +2173,18 @@ class Launcher(QMainWindow):
 
         # Cambiar página primero
         self.stack.setCurrentIndex(index)
+
+        nav_buttons = [self.btn_inicio, self.btn_servers, self.btn_news, self.btn_settings, self.btn_support]
+        for i, button in enumerate(nav_buttons):
+            if i == index:
+                button.setStyleSheet("""
+                    QPushButton { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(75,88,255,90),stop:1 rgba(92,70,190,55)); color:white; border:1px solid rgba(103,116,255,150); border-radius:12px; text-align:left; padding-left:18px; font-weight:650; }
+                """)
+            else:
+                button.setStyleSheet("""
+                    QPushButton { background:transparent; color:#aeb7cc; border:1px solid transparent; border-radius:12px; text-align:left; padding-left:18px; }
+                    QPushButton:hover { background-color:rgba(91,108,255,28); color:white; border-color:rgba(91,108,255,70); }
+                """)
 
         # Animar el contenedor (NO el widget interno)
         geo = self.stack_container.geometry()

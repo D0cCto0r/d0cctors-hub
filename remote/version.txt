@@ -1,2 +1,2 @@
-0.3-2026.4
-https://github.com/D0cCto0r/d0cctors-hub/releases/download/v0.3-2026.4/launcher.exe
+0.3-2026.3
+https://github.com/D0cCto0r/d0cctors-hub/releases/download/v0.3-2026.3/launcher.exe

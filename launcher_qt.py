@@ -1511,6 +1511,7 @@ class Launcher(QMainWindow):
         news_col = QVBoxLayout()
         news_col.setSpacing(5)
         news_head = QHBoxLayout()
+        news_head.setContentsMargins(0, 10, 0, 0)
         news_title = QLabel("NOTICIAS DESTACADAS")
         news_title.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
         news_title.setStyleSheet("color:#f2f5ff;letter-spacing:1px;border:none;")
@@ -1643,7 +1644,7 @@ class Launcher(QMainWindow):
         act.addStretch()
 
         activity_wrapper = QVBoxLayout()
-        activity_wrapper.setContentsMargins(0, 60, 0, 0)
+        activity_wrapper.setContentsMargins(0, 10, 0, 0)
         activity_wrapper.addWidget(activity)
         activity_wrapper.addStretch()
 

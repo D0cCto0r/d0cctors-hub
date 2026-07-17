@@ -11,12 +11,14 @@ import winreg
 import ctypes
 
 if not ctypes.windll.shell32.IsUserAnAdmin():
+    script_path = os.path.abspath(sys.argv[0])
+
     ctypes.windll.shell32.ShellExecuteW(
         None,
         "runas",
         sys.executable,
-        None,
-        None,
+        f'"{script_path}"',
+        os.path.dirname(script_path),
         1
     )
     sys.exit()

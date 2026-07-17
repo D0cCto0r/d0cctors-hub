@@ -1,6 +1,6 @@
 APP_VERSION = "0.3"
 APP_STAGE = "Beta"
-APP_BUILD = "2026.5"
+APP_BUILD = "2026.6"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
 import sys
@@ -771,7 +771,7 @@ class Launcher(QMainWindow):
 
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setWindowTitle("D0cCtor's Hub")
-        self.resize(1400, 850)
+        self.resize(1380, 820)
         self.setMinimumSize(1180, 720)
         
         
@@ -851,7 +851,7 @@ class Launcher(QMainWindow):
         # SIDEBAR
         # ===============================
         sidebar = QFrame()
-        sidebar.setFixedWidth(260)
+        sidebar.setFixedWidth(244)
         sidebar.setObjectName("sidebar")
 
         sidebar.setStyleSheet("""
@@ -871,12 +871,12 @@ class Launcher(QMainWindow):
 
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setAlignment(Qt.AlignTop)
-        sidebar_layout.setContentsMargins(18, 24, 18, 18)
+        sidebar_layout.setContentsMargins(16, 20, 16, 16)
         sidebar_layout.setSpacing(12)
 
         # ===== LOGO IMAGEN =====
         pixmap = self.get_remote_asset("logo.png").scaled(
-            132, 132,
+            112, 112,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
@@ -1015,14 +1015,14 @@ class Launcher(QMainWindow):
 
         # Layout vertical principal del lado derecho
         content_wrapper = QVBoxLayout(main_content)
-        content_wrapper.setContentsMargins(28, 14, 24, 18)
+        content_wrapper.setContentsMargins(24, 10, 20, 14)
         content_wrapper.setSpacing(0)
 
         # ===============================
         # TOPBAR / CONTROLES DE VENTANA
         # ===============================
         topbar = QHBoxLayout()
-        topbar.setContentsMargins(0, 0, 0, 10)
+        topbar.setContentsMargins(0, 0, 0, 8)
         topbar.setSpacing(8)
         topbar.addStretch()
 
@@ -1037,7 +1037,7 @@ class Launcher(QMainWindow):
 
         profile = QFrame()
         profile.setObjectName("profileTop")
-        profile.setFixedSize(210, 48)
+        profile.setFixedSize(192, 42)
         profile.setStyleSheet("""
             #profileTop { background:#0b111d; border:1px solid rgba(255,255,255,25); border-radius:12px; }
         """)
@@ -1045,10 +1045,10 @@ class Launcher(QMainWindow):
         profile_layout.setContentsMargins(10, 5, 12, 5)
         profile_layout.setSpacing(9)
         avatar = QLabel()
-        avatar.setFixedSize(34, 34)
+        avatar.setFixedSize(30, 30)
         avatar_pm = self.get_remote_asset("logo.png")
         if avatar_pm and not avatar_pm.isNull():
-            avatar.setPixmap(avatar_pm.scaled(34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            avatar.setPixmap(avatar_pm.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         avatar.setAlignment(Qt.AlignCenter)
         profile_text = QVBoxLayout()
         profile_text.setSpacing(0)
@@ -1376,8 +1376,8 @@ class Launcher(QMainWindow):
         # HERO COMPACTO
         hero = QFrame()
         hero.setObjectName("hero")
-        hero.setMinimumHeight(255)
-        hero.setMaximumHeight(285)
+        hero.setMinimumHeight(220)
+        hero.setMaximumHeight(238)
         hero.setStyleSheet("""
             #hero {
                 background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101a35,stop:0.55 #101a2b,stop:1 #1a1438);
@@ -1386,7 +1386,7 @@ class Launcher(QMainWindow):
             }
         """)
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(40, 28, 24, 22)
+        hero_layout.setContentsMargins(34, 22, 20, 18)
         hero_layout.setSpacing(24)
 
         left = QVBoxLayout()
@@ -1396,9 +1396,9 @@ class Launcher(QMainWindow):
         hero_title = QLabel("EXPLORÁ. CONSTRUÍ. <span style='color:#6d78ff'>SOBREVIVÍ.</span>")
         hero_title.setTextFormat(Qt.RichText)
         hero_title.setWordWrap(True)
-        hero_title.setFont(QFont(self.montserrat, 25, QFont.Weight.Bold))
+        hero_title.setFont(QFont(self.montserrat, 23, QFont.Weight.Bold))
         hero_title.setStyleSheet("color:white;border:none;")
-        hero_sub = QLabel("Entrá a nuestros servidores, instalá el modpack y mantené todo actualizado desde un solo lugar.")
+        hero_sub = QLabel("Jugá, instalá y actualizá tus servidores desde un único launcher.")
         hero_sub.setWordWrap(True)
         hero_sub.setMaximumWidth(520)
         hero_sub.setStyleSheet("color:#aeb7cc;font-size:12px;border:none;")
@@ -1406,11 +1406,11 @@ class Launcher(QMainWindow):
         actions = QHBoxLayout()
         actions.setSpacing(10)
         play_btn = QPushButton("▶   JUGAR")
-        play_btn.setFixedSize(175, 52)
+        play_btn.setFixedSize(168, 46)
         play_btn.setCursor(Qt.PointingHandCursor)
         play_btn.setStyleSheet("QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4d5cff,stop:1 #765cff);color:white;border:none;border-radius:13px;font-size:15px;font-weight:750;} QPushButton:hover{background:#6873ff;} QPushButton:disabled{background:#343b61;color:#8991ad;}")
         install_btn = QPushButton("⇩   INSTALAR")
-        install_btn.setFixedSize(170, 52)
+        install_btn.setFixedSize(164, 46)
         install_btn.setCursor(Qt.PointingHandCursor)
         install_btn.setStyleSheet("QPushButton{background:rgba(6,10,20,185);color:#edf0f8;border:1px solid rgba(255,255,255,38);border-radius:13px;font-size:13px;font-weight:700;} QPushButton:hover{border-color:#6875ff;background:rgba(25,32,60,220);}")
 
@@ -1439,13 +1439,13 @@ class Launcher(QMainWindow):
 
         art = QLabel()
         art.setObjectName("heroArt")
-        art.setMinimumWidth(300)
-        art.setMaximumWidth(410)
+        art.setMinimumWidth(270)
+        art.setMaximumWidth(360)
         art.setAlignment(Qt.AlignCenter)
         art.setStyleSheet("#heroArt{background:rgba(4,7,14,80);border:1px solid rgba(255,255,255,20);border-radius:14px;}")
         hero_pm = self.get_remote_asset("minecraft.png")
         if hero_pm and not hero_pm.isNull():
-            art.setPixmap(hero_pm.scaled(240, 210, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            art.setPixmap(hero_pm.scaled(220, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         hero_layout.addWidget(art, 3)
         layout.addWidget(hero)
 
@@ -1474,18 +1474,18 @@ class Launcher(QMainWindow):
         for server_name, data in list(self.servers_data.items())[:4]:
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setMinimumHeight(96)
+            card.setMinimumHeight(86)
             card.setStyleSheet("#homeServerCard{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:13px;} #homeServerCard:hover{border-color:rgba(91,108,255,95);}")
             row = QHBoxLayout(card)
             row.setContentsMargins(12, 11, 12, 11)
             row.setSpacing(10)
             icon = QLabel()
-            icon.setFixedSize(58,58)
+            icon.setFixedSize(50,50)
             icon.setAlignment(Qt.AlignCenter)
             icon.setStyleSheet("background:#111a2b;border-radius:11px;border:none;")
             pm = self.get_remote_pixmap(data.get("image_url"))
             if pm and not pm.isNull():
-                icon.setPixmap(pm.scaled(50,50,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+                icon.setPixmap(pm.scaled(44,44,Qt.KeepAspectRatio,Qt.SmoothTransformation))
             txt = QVBoxLayout()
             txt.setSpacing(1)
             name = QLabel(server_name)
@@ -1521,23 +1521,27 @@ class Launcher(QMainWindow):
         news_head.addWidget(news_more)
         news_col.addLayout(news_head)
 
+        news_hint = QLabel("Novedades, eventos y actualizaciones de la comunidad")
+        news_hint.setStyleSheet("color:#697287;font-size:10px;border:none;")
+        news_col.addWidget(news_hint)
+
         if self.news_data:
             item = self.news_data[0]
             news_card = QFrame()
             news_card.setObjectName("featuredNews")
-            news_card.setMinimumHeight(185)
+            news_card.setMinimumHeight(205)
             news_card.setStyleSheet("#featuredNews{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
             nrow = QHBoxLayout(news_card)
             nrow.setContentsMargins(0,0,0,0)
             nrow.setSpacing(0)
             image = QLabel()
-            image.setMinimumWidth(280)
-            image.setMaximumWidth(340)
+            image.setMinimumWidth(330)
+            image.setMaximumWidth(430)
             image.setAlignment(Qt.AlignCenter)
             image.setStyleSheet("background:#101827;border-top-left-radius:14px;border-bottom-left-radius:14px;border:none;")
             npm = self.get_remote_pixmap(item.get("image"))
             if npm and not npm.isNull():
-                image.setPixmap(npm.scaled(340,185,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+                image.setPixmap(npm.scaled(430,205,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
             ntext = QVBoxLayout()
             ntext.setContentsMargins(18,16,18,14)
             ntext.setSpacing(7)
@@ -1559,8 +1563,8 @@ class Launcher(QMainWindow):
 
         activity = QFrame()
         activity.setObjectName("activityPanel")
-        activity.setMinimumWidth(300)
-        activity.setMaximumWidth(360)
+        activity.setMinimumWidth(270)
+        activity.setMaximumWidth(310)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
         act.setContentsMargins(16,14,16,14)
@@ -1569,10 +1573,10 @@ class Launcher(QMainWindow):
         atitle.setStyleSheet("color:#f2f5ff;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
         act.addWidget(atitle)
         activities = [
+            ("●", "ShibuyaSMP disponible", "Servidor online"),
+            ("●", "Modpack verificado", "Archivos sincronizados"),
+            ("●", "ARK conectado", "Steam listo"),
             ("●", "Launcher actualizado", f"Build {APP_BUILD}"),
-            ("●", "ShibuyaSMP está disponible", "Servidor listo para jugar"),
-            ("●", "ARK sincronizado", "Colección de mods configurada"),
-            ("●", "Noticias actualizadas", "Contenido remoto cargado"),
         ]
         for symbol, title_text, detail in activities:
             row = QHBoxLayout()

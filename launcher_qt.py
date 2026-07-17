@@ -2310,6 +2310,38 @@ class Launcher(QMainWindow):
                         }
                     """)
                     
+    def _refresh_home_layout(self):
+        """Fuerza a Qt a recalcular la geometría de Inicio tras montar la ventana."""
+        try:
+            if hasattr(self, "home_page") and self.home_page is not None:
+                self.home_page.updateGeometry()
+                self.home_page.adjustSize()
+
+                viewport = getattr(self.home_page, "viewport", None)
+                if callable(viewport):
+                    self.home_page.viewport().update()
+
+            if hasattr(self, "stack_container") and self.stack_container is not None:
+                layout = self.stack_container.layout()
+                if layout is not None:
+                    layout.invalidate()
+                    layout.activate()
+
+                self.stack_container.updateGeometry()
+                self.stack_container.update()
+
+            central = self.centralWidget()
+            if central is not None:
+                layout = central.layout()
+                if layout is not None:
+                    layout.invalidate()
+                    layout.activate()
+                central.updateGeometry()
+                central.update()
+
+        except Exception as exc:
+            print("No se pudo recalcular Inicio:", exc)
+
     # =====================================================
     # PAGE TRANSITION (FADE FIXED)
     # =====================================================

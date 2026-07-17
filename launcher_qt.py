@@ -770,7 +770,8 @@ class Launcher(QMainWindow):
             self.montserrat = "Arial"
 
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setWindowTitle(" ")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setWindowTitle("D0cCtor's Hub")
         self.resize(1400, 850)
         self.setMinimumSize(1180, 720)
         
@@ -830,10 +831,12 @@ class Launcher(QMainWindow):
        
 
         central = QWidget()
+        central.setObjectName("appRoot")
+        central.setStyleSheet("#appRoot { background: transparent; }")
         self.setCentralWidget(central)
 
         main_vertical = QVBoxLayout(central)
-        main_vertical.setContentsMargins(0, 0, 0, 0)
+        main_vertical.setContentsMargins(7, 7, 7, 7)
         main_vertical.setSpacing(0)
 
         # ===============================
@@ -861,7 +864,9 @@ class Launcher(QMainWindow):
                 stop:0.55 #080d18,
                 stop:1 #060a12
             );
-            border-right: 1px solid rgba(122, 92, 255, 70);
+            border-right: 1px solid rgba(122, 92, 255, 55);
+            border-top-left-radius: 18px;
+            border-bottom-left-radius: 18px;
         }
         """)
 
@@ -997,7 +1002,17 @@ class Launcher(QMainWindow):
         # MAIN CONTENT CON STACK
         # ===============================
         main_content = QFrame()
-        main_content.setStyleSheet("background-color: #060a12;")
+        main_content.setObjectName("mainContent")
+        main_content.setStyleSheet("""
+            #mainContent {
+                background-color: #060a12;
+                border-top-right-radius: 18px;
+                border-bottom-right-radius: 18px;
+                border-top: 1px solid rgba(255,255,255,18);
+                border-right: 1px solid rgba(255,255,255,18);
+                border-bottom: 1px solid rgba(255,255,255,18);
+            }
+        """)
 
         # Layout vertical principal del lado derecho
         content_wrapper = QVBoxLayout(main_content)
@@ -1005,48 +1020,74 @@ class Launcher(QMainWindow):
         content_wrapper.setSpacing(0)
 
         # ===============================
-        # BOTONES VENTANA (arriba derecha)
+        # TOPBAR / CONTROLES DE VENTANA
         # ===============================
-        window_controls = QHBoxLayout()
-        window_controls.setSpacing(5)
-        window_controls.addStretch()
+        topbar = QHBoxLayout()
+        topbar.setContentsMargins(0, 0, 0, 10)
+        topbar.setSpacing(8)
+        topbar.addStretch()
 
-        min_btn = QPushButton("—")
-        min_btn.setFixedSize(30, 30)
-        min_btn.setCursor(Qt.PointingHandCursor)
-        min_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255,255,255,0.1);
-                color: white;
-                font-size: 15px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: red;
-            }
+        notify_btn = QPushButton("♢")
+        notify_btn.setToolTip("Notificaciones")
+        notify_btn.setFixedSize(36, 36)
+        notify_btn.setCursor(Qt.PointingHandCursor)
+        notify_btn.setStyleSheet("""
+            QPushButton { background:transparent; color:#aeb7cc; border:none; border-radius:9px; font-size:18px; }
+            QPushButton:hover { background:rgba(91,108,255,32); color:white; }
         """)
+
+        profile = QFrame()
+        profile.setObjectName("profileTop")
+        profile.setFixedSize(210, 48)
+        profile.setStyleSheet("""
+            #profileTop { background:#0b111d; border:1px solid rgba(255,255,255,25); border-radius:12px; }
+        """)
+        profile_layout = QHBoxLayout(profile)
+        profile_layout.setContentsMargins(10, 5, 12, 5)
+        profile_layout.setSpacing(9)
+        avatar = QLabel()
+        avatar.setFixedSize(34, 34)
+        avatar_pm = self.get_remote_asset("logo.png")
+        if avatar_pm and not avatar_pm.isNull():
+            avatar.setPixmap(avatar_pm.scaled(34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        avatar.setAlignment(Qt.AlignCenter)
+        profile_text = QVBoxLayout()
+        profile_text.setSpacing(0)
+        profile_name = QLabel("D0cCtor")
+        profile_name.setStyleSheet("color:white; font-weight:700; font-size:12px; border:none;")
+        profile_status = QLabel("●  En línea")
+        profile_status.setStyleSheet("color:#49d17d; font-size:10px; border:none;")
+        profile_text.addWidget(profile_name)
+        profile_text.addWidget(profile_status)
+        profile_layout.addWidget(avatar)
+        profile_layout.addLayout(profile_text)
+        profile_layout.addStretch()
+        profile_layout.addWidget(QLabel("⌄"))
+
+        def window_button(text, hover_bg):
+            btn = QPushButton(text)
+            btn.setFixedSize(34, 34)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{ background:transparent; color:#aeb7cc; border:none; border-radius:8px; font-size:15px; }}
+                QPushButton:hover {{ background:{hover_bg}; color:white; }}
+            """)
+            return btn
+
+        min_btn = window_button("—", "rgba(255,255,255,22)")
+        max_btn = window_button("□", "rgba(255,255,255,22)")
+        close_btn = window_button("✕", "#d83b45")
         min_btn.clicked.connect(self.showMinimized)
-
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255,255,255,0.1);
-                color: white;
-                font-size: 15px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: red;
-            }
-        """)
+        max_btn.clicked.connect(lambda: self.showNormal() if self.isMaximized() else self.showMaximized())
         close_btn.clicked.connect(self.close)
 
-        window_controls.addWidget(min_btn)
-        window_controls.addWidget(close_btn)
-
-        content_wrapper.addLayout(window_controls)
+        topbar.addWidget(notify_btn)
+        topbar.addWidget(profile)
+        topbar.addSpacing(10)
+        topbar.addWidget(min_btn)
+        topbar.addWidget(max_btn)
+        topbar.addWidget(close_btn)
+        content_wrapper.addLayout(topbar)
 
         # ===============================
         # STACK
@@ -1317,214 +1358,245 @@ class Launcher(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea { background: transparent; border: none; }
-            QScrollArea > QWidget > QWidget { background: transparent; }
-            QScrollBar:vertical {
-                background: rgba(255,255,255,0.035);
-                width: 10px;
-                margin: 4px 0 4px 2px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(117,128,255,0.38);
-                border-radius: 5px;
-                min-height: 48px;
-            }
-            QScrollBar::handle:vertical:hover { background: rgba(117,128,255,0.62); }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
-        """)
+        scroll.setStyleSheet("QScrollArea { background:transparent; border:none; } QScrollBar:vertical { width:8px; background:transparent; } QScrollBar::handle:vertical { background:rgba(255,255,255,45); border-radius:4px; min-height:40px; }")
 
         page = QWidget()
         page.setObjectName("homePage")
-        page.setStyleSheet("#homePage { background: transparent; }")
-        page.setMinimumWidth(860)
-
+        page.setStyleSheet("#homePage { background:transparent; }")
         layout = QVBoxLayout(page)
-        layout.setSpacing(18)
-        layout.setContentsMargins(4, 8, 10, 16)
-        layout.setAlignment(Qt.AlignTop)
+        layout.setSpacing(14)
+        layout.setContentsMargins(4, 0, 4, 8)
 
-        # HERO PRINCIPAL
+        # Servidor principal: prioriza Minecraft
+        primary_name = next((name for name, data in self.servers_data.items() if data.get("type") != "steam"), None)
+        if primary_name is None and self.servers_data:
+            primary_name = next(iter(self.servers_data))
+        primary = self.servers_data.get(primary_name, {}) if primary_name else {}
+
+        # HERO COMPACTO
         hero = QFrame()
         hero.setObjectName("hero")
-        hero.setMinimumHeight(300)
-        hero.setMaximumHeight(330)
-        hero.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        hero.setMinimumHeight(255)
+        hero.setMaximumHeight(285)
         hero.setStyleSheet("""
             #hero {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(12, 20, 42, 245),
-                    stop:0.55 rgba(18, 24, 55, 230),
-                    stop:1 rgba(36, 20, 70, 225));
-                border: 1px solid rgba(91, 108, 255, 85);
-                border-radius: 18px;
+                background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101a35,stop:0.55 #101a2b,stop:1 #1a1438);
+                border:1px solid rgba(91,108,255,80);
+                border-radius:16px;
             }
         """)
         hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(38, 28, 30, 26)
+        hero_layout.setContentsMargins(40, 28, 24, 22)
         hero_layout.setSpacing(24)
 
-        hero_text = QVBoxLayout()
-        hero_text.setSpacing(8)
+        left = QVBoxLayout()
+        left.setSpacing(6)
         eyebrow = QLabel("D0CCTOR'S HUB")
-        eyebrow.setStyleSheet("color:#7f8cff; font-size:12px; font-weight:700; letter-spacing:2px;")
+        eyebrow.setStyleSheet("color:#7f8cff;font-size:11px;font-weight:700;letter-spacing:2px;border:none;")
+        hero_title = QLabel("EXPLORÁ. CONSTRUÍ. <span style='color:#6d78ff'>SOBREVIVÍ.</span>")
+        hero_title.setTextFormat(Qt.RichText)
+        hero_title.setWordWrap(True)
+        hero_title.setFont(QFont(self.montserrat, 25, QFont.Weight.Bold))
+        hero_title.setStyleSheet("color:white;border:none;")
+        hero_sub = QLabel("Entrá a nuestros servidores, instalá el modpack y mantené todo actualizado desde un solo lugar.")
+        hero_sub.setWordWrap(True)
+        hero_sub.setMaximumWidth(520)
+        hero_sub.setStyleSheet("color:#aeb7cc;font-size:12px;border:none;")
 
-        title = QLabel("EXPLORÁ. CONSTRUÍ. <span style='color:#6d78ff'>SOBREVIVÍ.</span>")
-        title.setTextFormat(Qt.RichText)
-        title.setWordWrap(True)
-        title.setMinimumHeight(92)
-        title.setFont(QFont(self.montserrat, 27, QFont.Weight.Bold))
-        title.setStyleSheet("color:white; background:transparent; border:none;")
-
-        subtitle = QLabel("Entrá a nuestros servidores, instalá modpacks y mantené todo actualizado desde un solo lugar.")
-        subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(560)
-        subtitle.setStyleSheet("color:#aeb7cc; font-size:13px; background:transparent; border:none;")
-
-        hero_buttons = QHBoxLayout()
-        hero_buttons.setSpacing(10)
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
         play_btn = QPushButton("▶   JUGAR")
-        play_btn.setFixedSize(190, 56)
+        play_btn.setFixedSize(175, 52)
         play_btn.setCursor(Qt.PointingHandCursor)
-        play_btn.setStyleSheet("""
-            QPushButton { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4d5cff,stop:1 #765cff); color:white; border:none; border-radius:14px; font-size:16px; font-weight:700; }
-            QPushButton:hover { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6370ff,stop:1 #8b72ff); }
-        """)
-        install_btn = QPushButton("⇩   SERVIDORES")
-        install_btn.setFixedSize(190, 56)
+        play_btn.setStyleSheet("QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4d5cff,stop:1 #765cff);color:white;border:none;border-radius:13px;font-size:15px;font-weight:750;} QPushButton:hover{background:#6873ff;} QPushButton:disabled{background:#343b61;color:#8991ad;}")
+        install_btn = QPushButton("⇩   INSTALAR")
+        install_btn.setFixedSize(170, 52)
         install_btn.setCursor(Qt.PointingHandCursor)
-        install_btn.setStyleSheet("""
-            QPushButton { background:rgba(8,12,24,180); color:#e8ebf5; border:1px solid rgba(255,255,255,35); border-radius:14px; font-size:14px; font-weight:650; }
-            QPushButton:hover { border-color:#6875ff; background:rgba(31,39,74,210); }
-        """)
-        play_btn.clicked.connect(lambda: self.switch_page(1))
-        install_btn.clicked.connect(lambda: self.switch_page(1))
-        hero_buttons.addWidget(play_btn)
-        hero_buttons.addWidget(install_btn)
-        hero_buttons.addStretch()
+        install_btn.setStyleSheet("QPushButton{background:rgba(6,10,20,185);color:#edf0f8;border:1px solid rgba(255,255,255,38);border-radius:13px;font-size:13px;font-weight:700;} QPushButton:hover{border-color:#6875ff;background:rgba(25,32,60,220);}")
 
-        hero_text.addWidget(eyebrow)
-        hero_text.addWidget(title)
-        hero_text.addWidget(subtitle)
-        hero_text.addSpacing(8)
-        hero_text.addLayout(hero_buttons)
-        hero_text.addStretch()
-        hero_layout.addLayout(hero_text, 3)
+        installed = bool(primary.get("installed"))
+        needs_update = bool(primary.get("needs_update"))
+        play_btn.setEnabled(installed and not needs_update)
+        install_btn.setText("↻   ACTUALIZAR" if needs_update else ("✓   INSTALADO" if installed else "⇩   INSTALAR"))
+        install_btn.setEnabled((not installed) or needs_update)
+        if primary_name:
+            play_btn.clicked.connect(lambda checked=False, n=primary_name: self.handle_server_action(n))
+            install_btn.clicked.connect(lambda checked=False, n=primary_name: self.handle_server_action(n))
+        actions.addWidget(play_btn)
+        actions.addWidget(install_btn)
+        actions.addStretch()
 
-        visual = QLabel()
-        visual.setObjectName("heroVisual")
-        visual.setMinimumWidth(250)
-        visual.setMaximumWidth(340)
-        visual.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        hero_pixmap = self.get_remote_asset("minecraft.png")
-        if hero_pixmap and not hero_pixmap.isNull():
-            visual.setPixmap(hero_pixmap.scaled(250, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        visual.setAlignment(Qt.AlignCenter)
-        visual.setStyleSheet("#heroVisual { background:rgba(5,8,16,90); border:1px solid rgba(255,255,255,22); border-radius:16px; }")
-        hero_layout.addWidget(visual, 2)
+        left.addWidget(eyebrow)
+        left.addWidget(hero_title)
+        left.addWidget(hero_sub)
+        left.addSpacing(8)
+        left.addLayout(actions)
+        left.addStretch()
+        hero_layout.addLayout(left, 5)
+
+        art = QLabel()
+        art.setObjectName("heroArt")
+        art.setMinimumWidth(300)
+        art.setMaximumWidth(410)
+        art.setAlignment(Qt.AlignCenter)
+        art.setStyleSheet("#heroArt{background:rgba(4,7,14,80);border:1px solid rgba(255,255,255,20);border-radius:14px;}")
+        hero_pm = self.get_remote_asset("minecraft.png")
+        if hero_pm and not hero_pm.isNull():
+            art.setPixmap(hero_pm.scaled(240, 210, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        hero_layout.addWidget(art, 3)
         layout.addWidget(hero)
 
-        # ESTADO Y SERVIDORES DESTACADOS
-        section_header = QHBoxLayout()
-        status_dot = QLabel("●")
-        status_dot.setStyleSheet("color:#49d17d; font-size:14px; background:transparent; border:none;")
-        section_title = QLabel("ESTADO DE SERVIDORES")
-        section_title.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
-        section_title.setStyleSheet("color:#f2f5ff; letter-spacing:1px; background:transparent; border:none;")
-        all_btn = QPushButton("VER TODOS  ›")
-        all_btn.setCursor(Qt.PointingHandCursor)
-        all_btn.setStyleSheet("QPushButton{background:#0d1424;color:#c7cee0;border:1px solid rgba(255,255,255,25);border-radius:9px;padding:8px 15px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
-        all_btn.clicked.connect(lambda: self.switch_page(1))
-        section_header.addWidget(status_dot)
-        section_header.addWidget(section_title)
-        section_header.addStretch()
-        section_header.addWidget(all_btn)
-        layout.addLayout(section_header)
+        # SERVIDORES
+        header = QHBoxLayout()
+        dot = QLabel("●")
+        dot.setStyleSheet("color:#49d17d;font-size:13px;border:none;")
+        htitle = QLabel("ESTADO DE SERVIDORES")
+        htitle.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
+        htitle.setStyleSheet("color:#f2f5ff;letter-spacing:1px;border:none;")
+        hsub = QLabel("●  Todos los sistemas operativos")
+        hsub.setStyleSheet("color:#687086;font-size:10px;border:none;")
+        view_all = QPushButton("VER TODOS  ›")
+        view_all.setCursor(Qt.PointingHandCursor)
+        view_all.setStyleSheet("QPushButton{background:#0b111d;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        view_all.clicked.connect(lambda: self.switch_page(1))
+        header.addWidget(dot)
+        header.addWidget(htitle)
+        header.addWidget(hsub)
+        header.addStretch()
+        header.addWidget(view_all)
+        layout.addLayout(header)
 
-        cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(12)
-        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards = QHBoxLayout()
+        cards.setSpacing(10)
         for server_name, data in list(self.servers_data.items())[:4]:
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setMinimumHeight(112)
-            card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            card.setStyleSheet("""
-                #homeServerCard {
-                    background:#0d1421;
-                    border:1px solid rgba(255,255,255,22);
-                    border-radius:14px;
-                }
-                #homeServerCard:hover { border-color:rgba(91,108,255,95); }
-                #homeServerCard QLabel { background:transparent; border:none; }
-            """)
-            card_layout = QHBoxLayout(card)
-            card_layout.setContentsMargins(14, 13, 14, 13)
-            card_layout.setSpacing(12)
-
-            image = QLabel()
-            image.setObjectName("serverThumb")
-            pixmap = self.get_remote_pixmap(data.get("image_url"))
-            if pixmap and not pixmap.isNull():
-                image.setPixmap(pixmap.scaled(62, 62, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            image.setFixedSize(68, 68)
-            image.setAlignment(Qt.AlignCenter)
-            image.setStyleSheet("#serverThumb { background:#111a2d; border:1px solid rgba(255,255,255,18); border-radius:12px; }")
-
-            text = QVBoxLayout()
-            text.setSpacing(3)
+            card.setMinimumHeight(96)
+            card.setStyleSheet("#homeServerCard{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:13px;} #homeServerCard:hover{border-color:rgba(91,108,255,95);}")
+            row = QHBoxLayout(card)
+            row.setContentsMargins(12, 11, 12, 11)
+            row.setSpacing(10)
+            icon = QLabel()
+            icon.setFixedSize(58,58)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setStyleSheet("background:#111a2b;border-radius:11px;border:none;")
+            pm = self.get_remote_pixmap(data.get("image_url"))
+            if pm and not pm.isNull():
+                icon.setPixmap(pm.scaled(50,50,Qt.KeepAspectRatio,Qt.SmoothTransformation))
+            txt = QVBoxLayout()
+            txt.setSpacing(1)
             name = QLabel(server_name)
-            name.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
-            name.setStyleSheet("color:white;")
-            version = QLabel(str(data.get("minecraft_version") or "Steam"))
-            version.setStyleSheet("color:#7f899f;font-size:11px;")
+            name.setStyleSheet("color:white;font-size:12px;font-weight:700;border:none;")
+            ver = QLabel(str(data.get("minecraft_version") or "Steam"))
+            ver.setStyleSheet("color:#7f899f;font-size:10px;border:none;")
             state = QLabel("●  Disponible")
-            state.setStyleSheet("color:#49d17d;font-size:11px;font-weight:650;")
-            text.addWidget(name)
-            text.addWidget(version)
-            text.addStretch()
-            text.addWidget(state)
-            card_layout.addWidget(image)
-            card_layout.addLayout(text, 1)
-            cards_layout.addWidget(card, 1)
-        layout.addLayout(cards_layout)
+            state.setStyleSheet("color:#49d17d;font-size:10px;border:none;")
+            txt.addWidget(name)
+            txt.addWidget(ver)
+            txt.addStretch()
+            txt.addWidget(state)
+            row.addWidget(icon)
+            row.addLayout(txt)
+            cards.addWidget(card,1)
+        layout.addLayout(cards)
 
-        # NOTICIA DESTACADA
-        news_header = QHBoxLayout()
+        # NOTICIAS + ACTIVIDAD RECIENTE
+        bottom = QHBoxLayout()
+        bottom.setSpacing(14)
+
+        news_col = QVBoxLayout()
+        news_head = QHBoxLayout()
         news_title = QLabel("NOTICIAS DESTACADAS")
-        news_title.setFont(QFont(self.montserrat, 12, QFont.Weight.Bold))
-        news_title.setStyleSheet("color:#f2f5ff; letter-spacing:1px; background:transparent; border:none;")
-        more_news_btn = QPushButton("VER TODAS  ›")
-        more_news_btn.setCursor(Qt.PointingHandCursor)
-        more_news_btn.setStyleSheet("QPushButton{background:#0d1424;color:#c7cee0;border:1px solid rgba(255,255,255,25);border-radius:9px;padding:8px 15px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
-        more_news_btn.clicked.connect(lambda: self.switch_page(2))
-        news_header.addWidget(news_title)
-        news_header.addStretch()
-        news_header.addWidget(more_news_btn)
-        layout.addLayout(news_header)
+        news_title.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
+        news_title.setStyleSheet("color:#f2f5ff;letter-spacing:1px;border:none;")
+        news_more = QPushButton("VER TODAS  ›")
+        news_more.setCursor(Qt.PointingHandCursor)
+        news_more.setStyleSheet("QPushButton{background:#0b111d;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        news_more.clicked.connect(lambda: self.switch_page(2))
+        news_head.addWidget(news_title)
+        news_head.addStretch()
+        news_head.addWidget(news_more)
+        news_col.addLayout(news_head)
 
-        latest = self.news_data[0] if self.news_data else None
-        if latest:
-            news_card = self.create_news_card(latest)
-            news_card.setMinimumWidth(0)
-            news_card.setFixedHeight(240)
-            news_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            layout.addWidget(news_card)
+        if self.news_data:
+            item = self.news_data[0]
+            news_card = QFrame()
+            news_card.setObjectName("featuredNews")
+            news_card.setMinimumHeight(185)
+            news_card.setStyleSheet("#featuredNews{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
+            nrow = QHBoxLayout(news_card)
+            nrow.setContentsMargins(0,0,0,0)
+            nrow.setSpacing(0)
+            image = QLabel()
+            image.setMinimumWidth(280)
+            image.setMaximumWidth(340)
+            image.setAlignment(Qt.AlignCenter)
+            image.setStyleSheet("background:#101827;border-top-left-radius:14px;border-bottom-left-radius:14px;border:none;")
+            npm = self.get_remote_pixmap(item.get("image"))
+            if npm and not npm.isNull():
+                image.setPixmap(npm.scaled(340,185,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+            ntext = QVBoxLayout()
+            ntext.setContentsMargins(18,16,18,14)
+            ntext.setSpacing(7)
+            badge = QLabel("ACTUALIZACIÓN   Hace poco")
+            badge.setStyleSheet("color:#777fff;font-size:10px;font-weight:700;border:none;")
+            nt = QLabel(item.get("title", "Novedades"))
+            nt.setWordWrap(True)
+            nt.setStyleSheet("color:white;font-size:14px;font-weight:700;border:none;")
+            nd = QLabel(item.get("description", ""))
+            nd.setWordWrap(True)
+            nd.setStyleSheet("color:#aeb7cc;font-size:11px;border:none;")
+            ntext.addWidget(badge)
+            ntext.addWidget(nt)
+            ntext.addWidget(nd)
+            ntext.addStretch()
+            nrow.addWidget(image,4)
+            nrow.addLayout(ntext,6)
+            news_col.addWidget(news_card)
+
+        activity = QFrame()
+        activity.setObjectName("activityPanel")
+        activity.setMinimumWidth(300)
+        activity.setMaximumWidth(360)
+        activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
+        act = QVBoxLayout(activity)
+        act.setContentsMargins(16,14,16,14)
+        act.setSpacing(10)
+        atitle = QLabel("ACTIVIDAD RECIENTE")
+        atitle.setStyleSheet("color:#f2f5ff;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
+        act.addWidget(atitle)
+        activities = [
+            ("●", "Launcher actualizado", f"Build {APP_BUILD}"),
+            ("●", "ShibuyaSMP está disponible", "Servidor listo para jugar"),
+            ("●", "ARK sincronizado", "Colección de mods configurada"),
+            ("●", "Noticias actualizadas", "Contenido remoto cargado"),
+        ]
+        for symbol, title_text, detail in activities:
+            row = QHBoxLayout()
+            ico = QLabel(symbol)
+            ico.setFixedSize(24,24)
+            ico.setAlignment(Qt.AlignCenter)
+            ico.setStyleSheet("background:rgba(73,209,125,35);color:#49d17d;border-radius:12px;border:none;")
+            texts = QVBoxLayout()
+            texts.setSpacing(0)
+            t = QLabel(title_text)
+            t.setStyleSheet("color:#dce2ef;font-size:10px;font-weight:650;border:none;")
+            d = QLabel(detail)
+            d.setStyleSheet("color:#747d91;font-size:9px;border:none;")
+            texts.addWidget(t)
+            texts.addWidget(d)
+            row.addWidget(ico)
+            row.addLayout(texts)
+            act.addLayout(row)
+        act.addStretch()
+
+        bottom.addLayout(news_col,7)
+        bottom.addWidget(activity,3)
+        layout.addLayout(bottom)
+        layout.addStretch()
 
         scroll.setWidget(page)
-        self.home_scroll = scroll
         return scroll
-
-    def _refresh_home_layout(self):
-        if hasattr(self, "home_page"):
-            self.home_page.updateGeometry()
-        if hasattr(self, "home_scroll"):
-            self.home_scroll.viewport().update()
-        self.stack_container.updateGeometry()
-        self.centralWidget().updateGeometry()
-        QApplication.processEvents()
 
 
     # ===============================

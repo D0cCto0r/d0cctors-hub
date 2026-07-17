@@ -406,8 +406,17 @@ class Launcher(QMainWindow):
             print("Versión remota:", remote_version)
             print("Versión local:", APP_FULL_VERSION)
 
-            if remote_version != APP_FULL_VERSION:
-                self.ask_update(remote_version, download_url)
+    def parse_version(version):
+        app_version, build = version.split("-", 1)
+    
+        app_parts = tuple(int(part) for part in app_version.split("."))
+        build_parts = tuple(int(part) for part in build.split("."))
+    
+        return app_parts + build_parts
+    
+    
+    if parse_version(remote_version) > parse_version(APP_FULL_VERSION):
+        self.ask_update(remote_version, download_url)
 
         except Exception as e:
             print("No se pudo verificar actualización:", e)

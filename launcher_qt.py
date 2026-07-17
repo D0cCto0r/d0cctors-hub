@@ -770,7 +770,6 @@ class Launcher(QMainWindow):
             self.montserrat = "Arial"
 
         self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setWindowTitle("D0cCtor's Hub")
         self.resize(1400, 850)
         self.setMinimumSize(1180, 720)
@@ -832,11 +831,11 @@ class Launcher(QMainWindow):
 
         central = QWidget()
         central.setObjectName("appRoot")
-        central.setStyleSheet("#appRoot { background: transparent; }")
+        central.setStyleSheet("#appRoot { background: #060a12; border-radius: 18px; }")
         self.setCentralWidget(central)
 
         main_vertical = QVBoxLayout(central)
-        main_vertical.setContentsMargins(7, 7, 7, 7)
+        main_vertical.setContentsMargins(0, 0, 0, 0)
         main_vertical.setSpacing(0)
 
         # ===============================

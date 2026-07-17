@@ -1,6 +1,6 @@
 APP_VERSION = "0.3"
 APP_STAGE = "Beta"
-APP_BUILD = "2026.6"
+APP_BUILD = "2026.6.1"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
 import sys
@@ -1357,14 +1357,15 @@ class Launcher(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { background:transparent; border:none; } QScrollBar:vertical { width:8px; background:transparent; } QScrollBar::handle:vertical { background:rgba(255,255,255,45); border-radius:4px; min-height:40px; }")
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background:transparent; border:none; }")
 
         page = QWidget()
         page.setObjectName("homePage")
         page.setStyleSheet("#homePage { background:transparent; }")
         layout = QVBoxLayout(page)
-        layout.setSpacing(14)
-        layout.setContentsMargins(4, 0, 4, 8)
+        layout.setSpacing(10)
+        layout.setContentsMargins(4, 0, 4, 2)
 
         # Servidor principal: prioriza Minecraft
         primary_name = next((name for name, data in self.servers_data.items() if data.get("type") != "steam"), None)
@@ -1376,8 +1377,8 @@ class Launcher(QMainWindow):
         # HERO COMPACTO
         hero = QFrame()
         hero.setObjectName("hero")
-        hero.setMinimumHeight(220)
-        hero.setMaximumHeight(238)
+        hero.setMinimumHeight(205)
+        hero.setMaximumHeight(218)
         hero.setStyleSheet("""
             #hero {
                 background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101a35,stop:0.55 #101a2b,stop:1 #1a1438);
@@ -1474,7 +1475,7 @@ class Launcher(QMainWindow):
         for server_name, data in list(self.servers_data.items())[:4]:
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setMinimumHeight(86)
+            card.setMinimumHeight(80)
             card.setStyleSheet("#homeServerCard{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:13px;} #homeServerCard:hover{border-color:rgba(91,108,255,95);}")
             row = QHBoxLayout(card)
             row.setContentsMargins(12, 11, 12, 11)
@@ -1508,6 +1509,7 @@ class Launcher(QMainWindow):
         bottom.setSpacing(14)
 
         news_col = QVBoxLayout()
+        news_col.setSpacing(3)
         news_head = QHBoxLayout()
         news_title = QLabel("NOTICIAS DESTACADAS")
         news_title.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
@@ -1522,14 +1524,14 @@ class Launcher(QMainWindow):
         news_col.addLayout(news_head)
 
         news_hint = QLabel("Novedades, eventos y actualizaciones de la comunidad")
-        news_hint.setStyleSheet("color:#697287;font-size:10px;border:none;")
+        news_hint.setStyleSheet("color:#697287;font-size:10px;border:none; margin-top:0px; margin-bottom:2px;")
         news_col.addWidget(news_hint)
 
         if self.news_data:
             item = self.news_data[0]
             news_card = QFrame()
             news_card.setObjectName("featuredNews")
-            news_card.setMinimumHeight(205)
+            news_card.setMinimumHeight(176)
             news_card.setStyleSheet("#featuredNews{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
             nrow = QHBoxLayout(news_card)
             nrow.setContentsMargins(0,0,0,0)
@@ -1541,10 +1543,10 @@ class Launcher(QMainWindow):
             image.setStyleSheet("background:#101827;border-top-left-radius:14px;border-bottom-left-radius:14px;border:none;")
             npm = self.get_remote_pixmap(item.get("image"))
             if npm and not npm.isNull():
-                image.setPixmap(npm.scaled(430,205,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
+                image.setPixmap(npm.scaled(430,176,Qt.KeepAspectRatioByExpanding,Qt.SmoothTransformation))
             ntext = QVBoxLayout()
-            ntext.setContentsMargins(18,16,18,14)
-            ntext.setSpacing(7)
+            ntext.setContentsMargins(16,12,16,10)
+            ntext.setSpacing(4)
             badge = QLabel("ACTUALIZACIÓN   Hace poco")
             badge.setStyleSheet("color:#777fff;font-size:10px;font-weight:700;border:none;")
             nt = QLabel(item.get("title", "Novedades"))
@@ -1565,10 +1567,12 @@ class Launcher(QMainWindow):
         activity.setObjectName("activityPanel")
         activity.setMinimumWidth(270)
         activity.setMaximumWidth(310)
+        activity.setMinimumHeight(176)
+        activity.setMaximumHeight(176)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
-        act.setContentsMargins(16,14,16,14)
-        act.setSpacing(10)
+        act.setContentsMargins(14,10,14,10)
+        act.setSpacing(6)
         atitle = QLabel("ACTIVIDAD RECIENTE")
         atitle.setStyleSheet("color:#f2f5ff;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
         act.addWidget(atitle)
@@ -1581,7 +1585,7 @@ class Launcher(QMainWindow):
         for symbol, title_text, detail in activities:
             row = QHBoxLayout()
             ico = QLabel(symbol)
-            ico.setFixedSize(24,24)
+            ico.setFixedSize(20,20)
             ico.setAlignment(Qt.AlignCenter)
             ico.setStyleSheet("background:rgba(73,209,125,35);color:#49d17d;border-radius:12px;border:none;")
             texts = QVBoxLayout()

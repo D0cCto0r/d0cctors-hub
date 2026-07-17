@@ -1520,7 +1520,7 @@ class Launcher(QMainWindow):
         news_more.clicked.connect(lambda: self.switch_page(2))
         news_head.addWidget(news_title)
         news_head.addStretch()
-        news_head.addWidget(news_more)
+        news_head.addWidget(news_more, alignment=Qt.AlignBottom)
         news_col.addLayout(news_head)
 
         news_hint = QLabel("Novedades, eventos y actualizaciones de la comunidad")
@@ -1533,7 +1533,7 @@ class Launcher(QMainWindow):
             for index, item in enumerate(news_items):
                 news_card = QFrame()
                 news_card.setObjectName(f"featuredNews{index}")
-                news_card.setFixedHeight(112)
+                news_card.setFixedHeight(135)
                 news_card.setStyleSheet(
                     "QFrame {"
                     "background:#0d131e;"
@@ -1561,7 +1561,7 @@ class Launcher(QMainWindow):
                     image.setPixmap(
                         npm.scaled(
                             320,
-                            112,
+                            135,
                             Qt.KeepAspectRatioByExpanding,
                             Qt.SmoothTransformation
                         )
@@ -1612,8 +1612,8 @@ class Launcher(QMainWindow):
         activity.setObjectName("activityPanel")
         activity.setMinimumWidth(230)
         activity.setMaximumWidth(260)
-        activity.setMinimumHeight(228)
-        activity.setMaximumHeight(228)
+        activity.setMinimumHeight(274)
+        activity.setMaximumHeight(274)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
         act.setContentsMargins(16,12,16,12)
@@ -1647,7 +1647,7 @@ class Launcher(QMainWindow):
         act.addStretch()
 
         activity_wrapper = QVBoxLayout()
-        activity_wrapper.setContentsMargins(0, 24, 0, 0)
+        activity_wrapper.setContentsMargins(0, 60, 0, 0)
         activity_wrapper.addWidget(activity)
         activity_wrapper.addStretch()
 

@@ -1371,6 +1371,7 @@ class Launcher(QMainWindow):
         if primary_name is None and self.servers_data:
             primary_name = next(iter(self.servers_data))
         primary = self.servers_data.get(primary_name, {}) if primary_name else {}
+        self.home_primary_name = primary_name
 
         # HERO COMPACTO
         hero = QFrame()
@@ -1412,6 +1413,9 @@ class Launcher(QMainWindow):
         install_btn.setFixedSize(170, 52)
         install_btn.setCursor(Qt.PointingHandCursor)
         install_btn.setStyleSheet("QPushButton{background:rgba(6,10,20,185);color:#edf0f8;border:1px solid rgba(255,255,255,38);border-radius:13px;font-size:13px;font-weight:700;} QPushButton:hover{border-color:#6875ff;background:rgba(25,32,60,220);}")
+
+        self.home_play_btn = play_btn
+        self.home_install_btn = install_btn
 
         installed = bool(primary.get("installed"))
         needs_update = bool(primary.get("needs_update"))
@@ -2270,7 +2274,37 @@ class Launcher(QMainWindow):
         self.refresh_server_buttons()
 
 
+    def refresh_home_action_buttons(self):
+        """Actualiza Jugar/Instalar del hero sin reconstruir la página Inicio."""
+        primary_name = getattr(self, "home_primary_name", None)
+        play_btn = getattr(self, "home_play_btn", None)
+        install_btn = getattr(self, "home_install_btn", None)
+
+        if not primary_name or play_btn is None or install_btn is None:
+            return
+
+        server = self.servers_data.get(primary_name, {})
+        installed = bool(server.get("installed"))
+        needs_update = bool(server.get("needs_update"))
+
+        play_btn.setEnabled(installed and not needs_update)
+
+        if needs_update:
+            install_btn.setText("↻   ACTUALIZAR")
+            install_btn.setEnabled(True)
+        elif installed:
+            install_btn.setText("✓   INSTALADO")
+            install_btn.setEnabled(False)
+        else:
+            install_btn.setText("⇩   INSTALAR")
+            install_btn.setEnabled(True)
+
+        play_btn.update()
+        install_btn.update()
+
     def refresh_server_buttons(self):
+        self.refresh_home_action_buttons()
+
         for card in self.findChildren(ServerCard):
             name = card.title
 

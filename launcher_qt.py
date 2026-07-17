@@ -1,6 +1,6 @@
 APP_VERSION = "0.3"
 APP_STAGE = "Beta"
-APP_BUILD = "2026.6.4"
+APP_BUILD = "2026.6.5"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
 import sys
@@ -1506,7 +1506,7 @@ class Launcher(QMainWindow):
 
         # NOTICIAS + ACTIVIDAD RECIENTE
         bottom = QHBoxLayout()
-        bottom.setSpacing(16)
+        bottom.setSpacing(10)
 
         news_col = QVBoxLayout()
         news_col.setSpacing(5)
@@ -1547,7 +1547,7 @@ class Launcher(QMainWindow):
                 nrow.setSpacing(0)
 
                 image = QLabel()
-                image.setFixedWidth(280)
+                image.setFixedWidth(320)
                 image.setAlignment(Qt.AlignCenter)
                 image.setStyleSheet(
                     "background:#101827;"
@@ -1560,7 +1560,7 @@ class Launcher(QMainWindow):
                 if npm and not npm.isNull():
                     image.setPixmap(
                         npm.scaled(
-                            280,
+                            320,
                             112,
                             Qt.KeepAspectRatioByExpanding,
                             Qt.SmoothTransformation
@@ -1610,8 +1610,8 @@ class Launcher(QMainWindow):
 
         activity = QFrame()
         activity.setObjectName("activityPanel")
-        activity.setMinimumWidth(250)
-        activity.setMaximumWidth(290)
+        activity.setMinimumWidth(230)
+        activity.setMaximumWidth(260)
         activity.setMinimumHeight(228)
         activity.setMaximumHeight(228)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
@@ -1651,8 +1651,8 @@ class Launcher(QMainWindow):
         activity_wrapper.addWidget(activity)
         activity_wrapper.addStretch()
 
-        bottom.addLayout(news_col,8)
-        bottom.addLayout(activity_wrapper,2)
+        bottom.addLayout(news_col,9)
+        bottom.addLayout(activity_wrapper,1)
         layout.addLayout(bottom)
         layout.addStretch()
 

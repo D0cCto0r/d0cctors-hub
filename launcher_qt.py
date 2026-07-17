@@ -1,6 +1,6 @@
 APP_VERSION = "0.3"
 APP_STAGE = "Beta"
-APP_BUILD = "2026.6.2"
+APP_BUILD = "2026.6.3"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
 import sys
@@ -1053,7 +1053,7 @@ class Launcher(QMainWindow):
         profile_text = QVBoxLayout()
         profile_text.setSpacing(0)
         profile_name = QLabel("D0cCtor")
-        profile_name.setStyleSheet("color:white; font-weight:700; font-size:12px; border:none;")
+        profile_name.setStyleSheet("color:white; font-weight:700; font-size:13px; border:none;")
         profile_status = QLabel("●  En línea")
         profile_status.setStyleSheet("color:#49d17d; font-size:10px; border:none;")
         profile_text.addWidget(profile_name)
@@ -1506,10 +1506,10 @@ class Launcher(QMainWindow):
 
         # NOTICIAS + ACTIVIDAD RECIENTE
         bottom = QHBoxLayout()
-        bottom.setSpacing(14)
+        bottom.setSpacing(16)
 
         news_col = QVBoxLayout()
-        news_col.setSpacing(2)
+        news_col.setSpacing(5)
         news_head = QHBoxLayout()
         news_title = QLabel("NOTICIAS DESTACADAS")
         news_title.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
@@ -1533,13 +1533,13 @@ class Launcher(QMainWindow):
             for index, item in enumerate(news_items):
                 news_card = QFrame()
                 news_card.setObjectName(f"featuredNews{index}")
-                news_card.setFixedHeight(84)
+                news_card.setFixedHeight(112)
                 news_card.setStyleSheet(
-                    f"#featuredNews{index}{{"
+                    "QFrame {"
                     "background:#0d131e;"
                     "border:1px solid rgba(255,255,255,22);"
                     "border-radius:12px;"
-                    "}}"
+                    "}"
                 )
 
                 nrow = QHBoxLayout(news_card)
@@ -1547,7 +1547,7 @@ class Launcher(QMainWindow):
                 nrow.setSpacing(0)
 
                 image = QLabel()
-                image.setFixedWidth(190)
+                image.setFixedWidth(250)
                 image.setAlignment(Qt.AlignCenter)
                 image.setStyleSheet(
                     "background:#101827;"
@@ -1560,29 +1560,29 @@ class Launcher(QMainWindow):
                 if npm and not npm.isNull():
                     image.setPixmap(
                         npm.scaled(
-                            190,
-                            84,
+                            250,
+                            112,
                             Qt.KeepAspectRatioByExpanding,
                             Qt.SmoothTransformation
                         )
                     )
 
                 ntext = QVBoxLayout()
-                ntext.setContentsMargins(12, 8, 12, 7)
-                ntext.setSpacing(2)
+                ntext.setContentsMargins(16, 10, 16, 9)
+                ntext.setSpacing(4)
 
                 badge_text = "DESTACADA" if index == 0 else "NOVEDAD"
                 badge = QLabel(badge_text)
                 badge.setStyleSheet(
                     "color:#777fff;"
-                    "font-size:9px;"
+                    "font-size:10px;"
                     "font-weight:700;"
                     "border:none;"
                 )
 
                 nt = QLabel(item.get("title", "Novedades"))
                 nt.setWordWrap(True)
-                nt.setMaximumHeight(36)
+                nt.setMaximumHeight(44)
                 nt.setStyleSheet(
                     "color:white;"
                     "font-size:12px;"
@@ -1591,11 +1591,11 @@ class Launcher(QMainWindow):
                 )
 
                 nd = QLabel(item.get("description", ""))
-                nd.setWordWrap(False)
-                nd.setMaximumHeight(18)
+                nd.setWordWrap(True)
+                nd.setMaximumHeight(34)
                 nd.setStyleSheet(
                     "color:#8f99ad;"
-                    "font-size:9px;"
+                    "font-size:10px;"
                     "border:none;"
                 )
 
@@ -1612,12 +1612,12 @@ class Launcher(QMainWindow):
         activity.setObjectName("activityPanel")
         activity.setMinimumWidth(270)
         activity.setMaximumWidth(310)
-        activity.setMinimumHeight(171)
-        activity.setMaximumHeight(171)
+        activity.setMinimumHeight(228)
+        activity.setMaximumHeight(228)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
-        act.setContentsMargins(14,8,14,8)
-        act.setSpacing(4)
+        act.setContentsMargins(16,12,16,12)
+        act.setSpacing(8)
         atitle = QLabel("ACTIVIDAD RECIENTE")
         atitle.setStyleSheet("color:#f2f5ff;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
         act.addWidget(atitle)
@@ -1630,7 +1630,7 @@ class Launcher(QMainWindow):
         for symbol, title_text, detail in activities:
             row = QHBoxLayout()
             ico = QLabel(symbol)
-            ico.setFixedSize(18,18)
+            ico.setFixedSize(22,22)
             ico.setAlignment(Qt.AlignCenter)
             ico.setStyleSheet("background:rgba(73,209,125,35);color:#49d17d;border-radius:12px;border:none;")
             texts = QVBoxLayout()

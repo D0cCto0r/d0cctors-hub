@@ -1,0 +1,14 @@
+{
+  "news": [
+    {
+      "title": "Lanzamiento del Launcher Oficial",
+      "description": "Instalá servidores, recibí noticias y mantené tus juegos actualizados desde una sola aplicación diseñada para la comunidad.",
+      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/news_bg.png"
+    },
+    {
+      "title": "ARK: Scorched Earth Próximamente",
+      "description": "Muy pronto abriremos nuestro nuevo servidor de ARK en el mapa Scorched Earth.",
+      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/news_bg.png"
+    }
+  ]
+}

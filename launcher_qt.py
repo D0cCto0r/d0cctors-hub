@@ -1523,10 +1523,6 @@ class Launcher(QMainWindow):
         news_head.addWidget(news_more, alignment=Qt.AlignBottom)
         news_col.addLayout(news_head)
 
-        news_hint = QLabel("Novedades, eventos y actualizaciones de la comunidad")
-        news_hint.setStyleSheet("color:#697287;font-size:10px;border:none; margin-top:0px; margin-bottom:2px;")
-        news_col.addWidget(news_hint)
-
         if self.news_data:
             news_items = self.news_data[:2]
 

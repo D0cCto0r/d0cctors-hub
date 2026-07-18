@@ -31,13 +31,18 @@ from PySide6.QtWidgets import (
     QLabel, QFrame, QComboBox, QFileDialog, QScrollArea,
     QStackedLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QSizePolicy
 )
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QPointF, QRectF, QSize
+from PySide6.QtGui import QFont, QIcon, QPen, QPolygonF
+from PySide6.QtSvg import QSvgRenderer
 from config_manager import ConfigManager
 import requests
 import minecraft_launcher_lib
 import psutil
 import subprocess
+import socket
+import struct
+import json
+import time
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
@@ -261,27 +266,67 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtGui import QPainter, QPainterPath
 
 class RoundedImage(QLabel):
-    def __init__(self, pixmap, radius=12):
+    def __init__(
+        self,
+        pixmap,
+        radius=12,
+        background_color="#172232",
+        round_mode="all"
+    ):
         super().__init__()
         self.pixmap_original = pixmap
         self.radius = radius
+        self.background_color = QColor(background_color)
+        self.round_mode = round_mode
+
+        # Evita fondos rectangulares detrás del recorte.
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("background:transparent; border:none;")
+
+    def _clip_path(self):
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+
+        if self.round_mode == "left":
+            # Extiende el rectángulo hacia la derecha para que solo queden
+            # redondeadas las dos esquinas exteriores izquierdas.
+            extended = QRectF(
+                rect.x(),
+                rect.y(),
+                rect.width() + self.radius,
+                rect.height()
+            )
+            path.addRoundedRect(extended, self.radius, self.radius)
+
+        elif self.round_mode == "none":
+            path.addRect(rect)
+
+        else:
+            path.addRoundedRect(rect, self.radius, self.radius)
+
+        return path
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        path = QPainterPath()
-        path.addRoundedRect(self.rect(), self.radius, self.radius)
+        path = self._clip_path()
         painter.setClipPath(path)
+        painter.fillPath(path, self.background_color)
 
-        if not self.pixmap_original.isNull():
+        if self.pixmap_original and not self.pixmap_original.isNull():
             scaled = self.pixmap_original.scaled(
                 self.width(),
                 self.height(),
                 Qt.KeepAspectRatioByExpanding,
                 Qt.SmoothTransformation
             )
-            painter.drawPixmap(0, 0, scaled)
+
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
             
             
 from PySide6.QtCore import QThread, Signal
@@ -382,6 +427,241 @@ class GameWatcher(QThread):
 
         self.finished_signal.emit(self.server_name)      
             
+
+class ServerStatusWorker(QThread):
+    """Consulta servidores reales sin bloquear la interfaz."""
+
+    status_ready = Signal(str, dict)
+
+    def __init__(self, servers, interval_seconds=30):
+        super().__init__()
+        self.servers = servers
+        self.interval_seconds = max(10, int(interval_seconds))
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    @staticmethod
+    def _split_address(address, default_port):
+        address = str(address or "").strip()
+
+        if not address:
+            return None, None
+
+        if address.startswith("[") and "]" in address:
+            host, remainder = address[1:].split("]", 1)
+            port = int(remainder[1:]) if remainder.startswith(":") else default_port
+            return host, port
+
+        if address.count(":") == 1:
+            host, port_text = address.rsplit(":", 1)
+            try:
+                return host.strip(), int(port_text)
+            except ValueError:
+                return address, default_port
+
+        return address, default_port
+
+    @staticmethod
+    def _encode_varint(value):
+        result = bytearray()
+        while True:
+            current = value & 0x7F
+            value >>= 7
+            if value:
+                current |= 0x80
+            result.append(current)
+            if not value:
+                return bytes(result)
+
+    @staticmethod
+    def _read_varint(sock):
+        value = 0
+        position = 0
+
+        while True:
+            raw = sock.recv(1)
+            if not raw:
+                raise ConnectionError("Conexión cerrada leyendo VarInt")
+
+            current = raw[0]
+            value |= (current & 0x7F) << position
+
+            if not current & 0x80:
+                return value
+
+            position += 7
+            if position >= 35:
+                raise ValueError("VarInt demasiado grande")
+
+    @classmethod
+    def query_minecraft(cls, address, timeout=3.0):
+        host, port = cls._split_address(address, 25565)
+        if not host:
+            raise ValueError("Falta server_ip")
+
+        started = time.perf_counter()
+
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            host_bytes = host.encode("utf-8")
+
+            handshake = (
+                cls._encode_varint(0)
+                + cls._encode_varint(760)
+                + cls._encode_varint(len(host_bytes))
+                + host_bytes
+                + struct.pack(">H", port)
+                + cls._encode_varint(1)
+            )
+
+            sock.sendall(cls._encode_varint(len(handshake)) + handshake)
+            sock.sendall(b"\x01\x00")
+
+            cls._read_varint(sock)
+            packet_id = cls._read_varint(sock)
+
+            if packet_id != 0:
+                raise ValueError(f"Respuesta Minecraft inesperada: {packet_id}")
+
+            json_length = cls._read_varint(sock)
+            response = bytearray()
+
+            while len(response) < json_length:
+                chunk = sock.recv(json_length - len(response))
+                if not chunk:
+                    raise ConnectionError("Respuesta Minecraft incompleta")
+                response.extend(chunk)
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        payload = json.loads(response.decode("utf-8"))
+
+        players = payload.get("players", {})
+        version = payload.get("version", {})
+
+        return {
+            "status": "online",
+            "players_online": int(players.get("online", 0) or 0),
+            "players_max": int(players.get("max", 0) or 0),
+            "ping": latency_ms,
+            "version": str(version.get("name", "") or ""),
+        }
+
+    @classmethod
+    def query_source(cls, address, timeout=3.0):
+        """Consulta A2S_INFO para servidores Steam/Source, incluido ARK."""
+        host, port = cls._split_address(address, 27015)
+        if not host:
+            raise ValueError("Falta query_ip o server_ip")
+
+        query = b"\xFF\xFF\xFF\xFFTSource Engine Query\x00"
+        started = time.perf_counter()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(timeout)
+            sock.sendto(query, (host, port))
+            response, _ = sock.recvfrom(65535)
+
+        latency_ms = round((time.perf_counter() - started) * 1000)
+
+        if not response.startswith(b"\xFF\xFF\xFF\xFFI"):
+            raise ValueError("Respuesta A2S_INFO no reconocida")
+
+        offset = 5
+
+        def read_cstring():
+            nonlocal offset
+            end = response.index(b"\x00", offset)
+            value = response[offset:end].decode("utf-8", errors="replace")
+            offset = end + 1
+            return value
+
+        protocol = response[offset]
+        offset += 1
+        server_name = read_cstring()
+        map_name = read_cstring()
+        folder = read_cstring()
+        game_name = read_cstring()
+
+        if offset + 5 > len(response):
+            raise ValueError("Respuesta A2S_INFO incompleta")
+
+        app_id = struct.unpack_from("<H", response, offset)[0]
+        offset += 2
+
+        players_online = response[offset]
+        players_max = response[offset + 1]
+        bots = response[offset + 2]
+
+        return {
+            "status": "online",
+            "players_online": int(players_online),
+            "players_max": int(players_max),
+            "ping": latency_ms,
+            "version": game_name or folder,
+            "server_name": server_name,
+            "map": map_name,
+            "app_id": int(app_id),
+            "bots": int(bots),
+            "protocol": int(protocol),
+        }
+
+    @classmethod
+    def query_server(cls, server):
+        manual_maintenance = bool(
+            server.get("maintenance")
+            or str(server.get("status_override", "")).lower() == "maintenance"
+            or str(server.get("status", "")).lower() == "maintenance"
+        )
+
+        if manual_maintenance:
+            return {
+                "status": "maintenance",
+                "players_online": 0,
+                "players_max": int(server.get("players_max", 0) or 0),
+                "ping": None,
+            }
+
+        server_type = str(
+            server.get("status_type")
+            or server.get("type")
+            or "minecraft"
+        ).lower()
+
+        try:
+            if server_type in {"steam", "source", "ark"}:
+                address = (
+                    server.get("query_ip")
+                    or server.get("query_address")
+                    or server.get("server_ip")
+                )
+                return cls.query_source(address)
+
+            address = server.get("server_ip") or server.get("address")
+            return cls.query_minecraft(address)
+
+        except Exception as exc:
+            return {
+                "status": "offline",
+                "players_online": 0,
+                "players_max": int(server.get("players_max", 0) or 0),
+                "ping": None,
+                "error": str(exc),
+            }
+
+    def run(self):
+        while self._running:
+            for server_id, server in list(self.servers.items()):
+                if not self._running:
+                    return
+                self.status_ready.emit(server_id, self.query_server(server))
+
+            for _ in range(self.interval_seconds * 10):
+                if not self._running:
+                    return
+                self.msleep(100)
+
 class Launcher(QMainWindow):
     
     def check_for_updates(self):
@@ -741,6 +1021,9 @@ class Launcher(QMainWindow):
     def __init__(self):
         super().__init__()
         self.news_data = []
+        self._svg_icon_cache = {}
+        self.home_server_status_widgets = {}
+        self.server_status_worker = None
         
         self.config_manager = ConfigManager()
         
@@ -768,6 +1051,12 @@ class Launcher(QMainWindow):
             self.montserrat = families[0] if families else "Arial"
         else:
             self.montserrat = "Arial"
+
+        # Suavizado global del texto.
+        app_font = QFont(self.montserrat, 10)
+        app_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        app_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        QApplication.instance().setFont(app_font)
 
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setWindowTitle("D0cCtor's Hub")
@@ -825,7 +1114,14 @@ class Launcher(QMainWindow):
                 "loader_version": server.get("loader_version"),
                 "needs_update": needs_update if server.get("type") != "steam" else False,
                 "type": server.get("type"),
-                "steam_appid": server.get("steam_appid")
+                "steam_appid": server.get("steam_appid"),
+                "server_ip": server.get("server_ip"),
+                "query_ip": server.get("query_ip"),
+                "query_address": server.get("query_address"),
+                "status_type": server.get("status_type"),
+                "maintenance": server.get("maintenance", False),
+                "status_override": server.get("status_override"),
+                "players_max": server.get("players_max", 0)
             }
        
 
@@ -900,33 +1196,26 @@ class Launcher(QMainWindow):
         self.timer.start(30)
 
         # ===== BOTONES =====
-
-        menu_items = [
-            ("⌂", "Inicio"),
-            ("▤", "Servidores"),
-            ("▦", "Noticias"),
-            ("⚙", "Ajustes"),
-            ("◉", "Soporte"),
-        ]
-
-        buttons = []
-
-        for icon, text in menu_items:
-            btn = QPushButton(f"{icon}  {text}")
+        def create_nav_button(icon_kind, text):
+            btn = QPushButton(f"   {text}")
             btn_font = QFont(self.montserrat, 13)
             btn_font.setWeight(QFont.Weight.Medium)
             btn.setFont(btn_font)
-            btn.setFixedHeight(48)
+            btn.setFixedHeight(50)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setProperty("navButton", True)
+            btn.setProperty("iconKind", icon_kind)
+            btn.setIcon(self.get_svg_icon(icon_kind, 21, "#aeb7c8"))
+            btn.setIconSize(QSize(21, 21))
             btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
                     color: #aeb7cc;
                     border: 1px solid transparent;
-                    border-radius: 12px;
+                    border-radius: 14px;
                     text-align: left;
-                    padding-left: 18px;
+                    padding-left: 14px;
+                    font-weight: 560;
                 }
                 QPushButton:hover {
                     background-color: rgba(91, 108, 255, 28);
@@ -934,6 +1223,20 @@ class Launcher(QMainWindow):
                     border-color: rgba(91, 108, 255, 70);
                 }
             """)
+            return btn
+
+        menu_items = [
+            ("home", "Inicio"),
+            ("servers", "Servidores"),
+            ("news", "Noticias"),
+            ("settings", "Ajustes"),
+            ("support", "Soporte"),
+            ("store", "Tienda"),
+        ]
+
+        buttons = []
+        for icon_kind, button_text in menu_items:
+            btn = create_nav_button(icon_kind, button_text)
             sidebar_layout.addWidget(btn)
             buttons.append(btn)
 
@@ -942,60 +1245,71 @@ class Launcher(QMainWindow):
         self.btn_news = buttons[2]
         self.btn_settings = buttons[3]
         self.btn_support = buttons[4]
+        self.btn_store = buttons[5]
 
         self.btn_inicio.clicked.connect(lambda: self.switch_page(0))
         self.btn_servers.clicked.connect(lambda: self.switch_page(1))
         self.btn_news.clicked.connect(lambda: self.switch_page(2))
         self.btn_settings.clicked.connect(lambda: self.switch_page(3))
         self.btn_support.clicked.connect(lambda: self.switch_page(4))
+        self.btn_store.clicked.connect(lambda: self.switch_page(5))
+
+        sidebar_layout.addSpacing(10)
+        sidebar_layout.addStretch()
 
         # ===============================
-        # VERSION PANEL (ABAJO SIDEBAR)
+        # STATUS PANEL (ABAJO SIDEBAR)
         # ===============================
-
-        version_card = QFrame()
-        version_card.setFixedHeight(95)
-        version_card.setStyleSheet("""
+        status_card = QFrame()
+        status_card.setFixedHeight(96)
+        status_card.setStyleSheet("""
             QFrame {
-                background-color: #1f1f2a;
-                border-radius: 12px;
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #0c1320,
+                    stop:1 #0a101a
+                );
+                border:1px solid rgba(255,255,255,18);
+                border-radius:14px;
             }
         """)
 
-        version_layout = QVBoxLayout(version_card)
-        version_layout.setContentsMargins(10, 10, 10, 10)
-        version_layout.setSpacing(4)
-        version_layout.setAlignment(Qt.AlignCenter)
+        status_layout = QHBoxLayout(status_card)
+        status_layout.setContentsMargins(14, 14, 14, 14)
+        status_layout.setSpacing(12)
 
-        # Versión principal
-        version_label = QLabel(f"v{APP_VERSION} {APP_STAGE}")
-        version_font = QFont(self.montserrat, 15)
-        version_font.setWeight(QFont.Weight.DemiBold)
-        version_label.setFont(version_font)
-        version_label.setStyleSheet("color: white;")
-        version_label.setAlignment(Qt.AlignCenter)
+        status_icon = QLabel()
+        status_icon.setFixedSize(28, 28)
+        status_icon.setPixmap(self.make_icon("check", 18, QColor("#5ee07a")))
+        status_icon.setAlignment(Qt.AlignCenter)
+        status_icon.setStyleSheet("""
+            background:rgba(94,224,122,0.12);
+            border:1px solid rgba(94,224,122,0.20);
+            border-radius:14px;
+        """)
 
-        # ✨ Glow efecto
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(25)
-        glow.setOffset(0)
-        glow.setColor(QColor(255, 255, 255, 120))
-        version_label.setGraphicsEffect(glow)
+        status_texts = QVBoxLayout()
+        status_texts.setSpacing(1)
 
-        # Build pequeña
-        build_label = QLabel(f"Build {APP_BUILD}")
-        build_font = QFont(self.montserrat, 9)
-        build_label.setFont(build_font)
-        build_label.setStyleSheet("color: #8888aa;")
-        build_label.setAlignment(Qt.AlignCenter)
+        status_title = QLabel("Launcher actualizado")
+        status_title.setStyleSheet("color:#ecf2ff;font-size:12px;font-weight:700;border:none;")
 
-        version_layout.addWidget(version_label)
-        version_layout.addWidget(build_label)
+        status_version = QLabel(f"Versión {APP_FULL_VERSION}")
+        status_version.setStyleSheet("color:#7f8aa1;font-size:10px;border:none;")
 
-        sidebar_layout.addSpacing(12)
-        sidebar_layout.addWidget(version_card)
+        status_texts.addWidget(status_title)
+        status_texts.addWidget(status_version)
 
-        sidebar_layout.addStretch()
+        status_arrow = QLabel()
+        status_arrow.setPixmap(self.make_icon("chevron", 14, QColor("#99a5bb")))
+        status_arrow.setAlignment(Qt.AlignCenter)
+        status_arrow.setStyleSheet("background:transparent;border:none;")
+
+        status_layout.addWidget(status_icon)
+        status_layout.addLayout(status_texts, 1)
+        status_layout.addWidget(status_arrow)
+
+        sidebar_layout.addWidget(status_card)
 
         # ===============================
         # MAIN CONTENT CON STACK
@@ -1063,19 +1377,30 @@ class Launcher(QMainWindow):
         profile_layout.addStretch()
         profile_layout.addWidget(QLabel("⌄"))
 
-        def window_button(text, hover_bg):
-            btn = QPushButton(text)
-            btn.setFixedSize(34, 34)
+        def window_button(icon_kind, hover_bg):
+            btn = QPushButton()
+            btn.setFixedSize(38, 38)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setIcon(QIcon(self.make_icon(icon_kind, 15, QColor("#b8c0d0"))))
+            btn.setIconSize(QSize(15, 15))
             btn.setStyleSheet(f"""
-                QPushButton {{ background:transparent; color:#aeb7cc; border:none; border-radius:8px; font-size:15px; }}
-                QPushButton:hover {{ background:{hover_bg}; color:white; }}
+                QPushButton {{
+                    background:transparent;
+                    border:none;
+                    border-radius:9px;
+                }}
+                QPushButton:hover {{
+                    background:{hover_bg};
+                }}
+                QPushButton:pressed {{
+                    background:rgba(255,255,255,30);
+                }}
             """)
             return btn
 
-        min_btn = window_button("—", "rgba(255,255,255,22)")
-        max_btn = window_button("□", "rgba(255,255,255,22)")
-        close_btn = window_button("✕", "#d83b45")
+        min_btn = window_button("window_minimize", "rgba(255,255,255,18)")
+        max_btn = window_button("window_maximize", "rgba(255,255,255,18)")
+        close_btn = window_button("window_close", "#d83b45")
         min_btn.clicked.connect(self.showMinimized)
         max_btn.clicked.connect(lambda: self.showNormal() if self.isMaximized() else self.showMaximized())
         close_btn.clicked.connect(self.close)
@@ -1120,6 +1445,7 @@ class Launcher(QMainWindow):
         self.news_page = self.create_news_page()
         self.settings_page = self.create_settings_page()
         self.support_page = self.create_support_page()
+        self.store_page = self.create_store_page()
 
         # Agregar páginas al stack
         self.stack.addWidget(self.home_page)
@@ -1127,8 +1453,10 @@ class Launcher(QMainWindow):
         self.stack.addWidget(self.news_page)
         self.stack.addWidget(self.settings_page)
         self.stack.addWidget(self.support_page)
+        self.stack.addWidget(self.store_page)
         self.refresh_server_buttons()
         self.auto_detect_paths()
+        self.start_server_status_monitor()
 
         main_layout.addWidget(sidebar)
         main_layout.addWidget(main_content)
@@ -1152,6 +1480,79 @@ class Launcher(QMainWindow):
         self.check_for_updates()
             
         
+    # =====================================================
+    # REAL SERVER STATUS
+    # =====================================================
+    def start_server_status_monitor(self):
+        if self.server_status_worker is not None:
+            return
+
+        self.server_status_worker = ServerStatusWorker(
+            self.servers_data,
+            interval_seconds=30
+        )
+        self.server_status_worker.status_ready.connect(
+            self.update_home_server_status
+        )
+        self.server_status_worker.start()
+
+    def update_home_server_status(self, server_name, result):
+        widgets = self.home_server_status_widgets.get(server_name)
+        if not widgets:
+            return
+
+        status = str(result.get("status", "offline")).lower()
+
+        status_styles = {
+            "online": ("En línea", "#55dc7a"),
+            "offline": ("Offline", "#ff6674"),
+            "maintenance": ("Mantenimiento", "#f5bf57"),
+        }
+
+        status_text, color = status_styles.get(
+            status,
+            status_styles["offline"]
+        )
+
+        widgets["state_dot"].setText("●")
+        widgets["state_dot"].setStyleSheet(
+            f"color:{color};font-size:9px;border:none;"
+        )
+        widgets["state_label"].setText(status_text)
+        widgets["state_label"].setStyleSheet(
+            f"color:{color};font-size:9px;font-weight:650;border:none;"
+        )
+
+        online = int(result.get("players_online", 0) or 0)
+        maximum = int(result.get("players_max", 0) or 0)
+        widgets["players_label"].setText(
+            f"{online}/{maximum}" if maximum > 0 else str(online)
+        )
+
+        ping = result.get("ping")
+        if status == "online" and ping is not None:
+            widgets["ping_label"].setText(f"{int(ping)}ms")
+            widgets["ping_label"].setStyleSheet(
+                "color:#59da72;font-size:9px;font-weight:650;border:none;"
+            )
+        else:
+            widgets["ping_label"].setText("—")
+            widgets["ping_label"].setStyleSheet(
+                "color:#687286;font-size:10px;border:none;"
+            )
+
+        detected_version = str(result.get("version", "") or "").strip()
+        if detected_version:
+            widgets["version_label"].setText(detected_version)
+
+    def closeEvent(self, event):
+        worker = getattr(self, "server_status_worker", None)
+        if worker is not None:
+            worker.stop()
+            worker.wait(1500)
+
+        super().closeEvent(event)
+
     # =====================================================
     # SELECT FOLDERS
     # =====================================================
@@ -1239,6 +1640,226 @@ class Launcher(QMainWindow):
             pass
 
         return QPixmap()
+
+
+    # ===============================
+    # ICONOS SVG DEL LAUNCHER
+    # ===============================
+    def get_svg_icon(self, icon_name, size=21, color="#aeb7c8"):
+        cache_key = (icon_name, size, color)
+        cached = self._svg_icon_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        svg_data = None
+        local_path = resource_path(os.path.join("icons", f"{icon_name}.svg"))
+
+        try:
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as svg_file:
+                    svg_data = svg_file.read()
+            else:
+                remote_url = (
+                    "https://raw.githubusercontent.com/"
+                    "D0cCto0r/d0cctors-hub/main/remote/assets/icons/"
+                    f"{icon_name}.svg"
+                )
+                response = requests.get(remote_url, timeout=8)
+                if response.status_code == 200:
+                    svg_data = response.content
+        except Exception as exc:
+            print(f"No se pudo cargar el icono SVG {icon_name}:", exc)
+
+        if not svg_data:
+            fallback = QIcon(self.make_icon(icon_name, size, QColor(color), filled=True))
+            self._svg_icon_cache[cache_key] = fallback
+            return fallback
+
+        try:
+            svg_text = svg_data.decode("utf-8")
+            svg_text = svg_text.replace('fill="#000000"', f'fill="{color}"')
+            svg_text = svg_text.replace("fill='#000000'", f"fill='{color}'")
+            svg_text = svg_text.replace('stroke="#000000"', f'stroke="{color}"')
+            svg_text = svg_text.replace("stroke='#000000'", f"stroke='{color}'")
+
+            renderer = QSvgRenderer(QByteArray(svg_text.encode("utf-8")))
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.transparent)
+
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            renderer.render(painter)
+            painter.end()
+
+            icon = QIcon(pixmap)
+            self._svg_icon_cache[cache_key] = icon
+            return icon
+
+        except Exception as exc:
+            print(f"No se pudo renderizar el icono SVG {icon_name}:", exc)
+            fallback = QIcon(self.make_icon(icon_name, size, QColor(color), filled=True))
+            self._svg_icon_cache[cache_key] = fallback
+            return fallback
+
+    def update_nav_icon(self, button, active=False):
+        icon_name = button.property("iconKind")
+        if not icon_name:
+            return
+
+        color = "#ffffff" if active else "#aeb7c8"
+        button.setIcon(self.get_svg_icon(icon_name, 21, color))
+        button.setIconSize(QSize(21, 21))
+
+    # ===============================
+    # ICONOS VECTORIALES DE RESPALDO
+    # ===============================
+    def make_icon(self, kind, size=18, color=None, filled=False):
+        """Crea iconos limpios sin depender de caracteres Unicode."""
+        color = color or QColor("#ffffff")
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        pen = QPen(color)
+        pen.setWidthF(max(1.6, size * 0.095))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(color) if filled else Qt.NoBrush)
+
+        if kind == "home":
+            painter.drawLine(QPointF(size * 0.22, size * 0.45), QPointF(size * 0.50, size * 0.21))
+            painter.drawLine(QPointF(size * 0.78, size * 0.45), QPointF(size * 0.50, size * 0.21))
+            painter.drawLine(QPointF(size * 0.30, size * 0.42), QPointF(size * 0.30, size * 0.78))
+            painter.drawLine(QPointF(size * 0.70, size * 0.42), QPointF(size * 0.70, size * 0.78))
+            painter.drawLine(QPointF(size * 0.30, size * 0.78), QPointF(size * 0.70, size * 0.78))
+            painter.drawLine(QPointF(size * 0.44, size * 0.78), QPointF(size * 0.44, size * 0.57))
+            painter.drawLine(QPointF(size * 0.56, size * 0.78), QPointF(size * 0.56, size * 0.57))
+
+        elif kind == "servers":
+            for y in (0.28, 0.50, 0.72):
+                painter.drawRoundedRect(QRectF(size * 0.20, size * y, size * 0.60, size * 0.10), size * 0.05, size * 0.05)
+            for y in (0.33, 0.55, 0.77):
+                painter.drawPoint(QPointF(size * 0.28, size * y))
+
+        elif kind == "news":
+            painter.drawRoundedRect(QRectF(size * 0.20, size * 0.20, size * 0.60, size * 0.60), size * 0.08, size * 0.08)
+            painter.drawLine(QPointF(size * 0.32, size * 0.35), QPointF(size * 0.68, size * 0.35))
+            painter.drawLine(QPointF(size * 0.32, size * 0.49), QPointF(size * 0.68, size * 0.49))
+            painter.drawLine(QPointF(size * 0.32, size * 0.63), QPointF(size * 0.56, size * 0.63))
+
+        elif kind == "settings":
+            painter.drawEllipse(QRectF(size * 0.34, size * 0.34, size * 0.32, size * 0.32))
+            for p1, p2 in [
+                (QPointF(0.50, 0.12), QPointF(0.50, 0.26)),
+                (QPointF(0.50, 0.74), QPointF(0.50, 0.88)),
+                (QPointF(0.12, 0.50), QPointF(0.26, 0.50)),
+                (QPointF(0.74, 0.50), QPointF(0.88, 0.50)),
+                (QPointF(0.23, 0.23), QPointF(0.32, 0.32)),
+                (QPointF(0.68, 0.68), QPointF(0.77, 0.77)),
+                (QPointF(0.68, 0.32), QPointF(0.77, 0.23)),
+                (QPointF(0.23, 0.77), QPointF(0.32, 0.68)),
+            ]:
+                painter.drawLine(QPointF(size * p1.x(), size * p1.y()), QPointF(size * p2.x(), size * p2.y()))
+
+        elif kind == "support":
+            painter.drawArc(int(size * 0.18), int(size * 0.20), int(size * 0.64), int(size * 0.56), 0, 180 * 16)
+            painter.drawLine(QPointF(size * 0.22, size * 0.46), QPointF(size * 0.22, size * 0.70))
+            painter.drawLine(QPointF(size * 0.78, size * 0.46), QPointF(size * 0.78, size * 0.70))
+            painter.drawLine(QPointF(size * 0.22, size * 0.70), QPointF(size * 0.32, size * 0.70))
+            painter.drawLine(QPointF(size * 0.68, size * 0.70), QPointF(size * 0.78, size * 0.70))
+            painter.drawLine(QPointF(size * 0.40, size * 0.78), QPointF(size * 0.60, size * 0.78))
+
+        elif kind == "store":
+            painter.drawRoundedRect(QRectF(size * 0.20, size * 0.34, size * 0.60, size * 0.42), size * 0.08, size * 0.08)
+            painter.drawLine(QPointF(size * 0.32, size * 0.34), QPointF(size * 0.38, size * 0.20))
+            painter.drawLine(QPointF(size * 0.68, size * 0.34), QPointF(size * 0.62, size * 0.20))
+            painter.drawLine(QPointF(size * 0.38, size * 0.20), QPointF(size * 0.62, size * 0.20))
+
+        elif kind == "check":
+            painter.drawLine(QPointF(size * 0.22, size * 0.54), QPointF(size * 0.42, size * 0.73))
+            painter.drawLine(QPointF(size * 0.42, size * 0.73), QPointF(size * 0.79, size * 0.28))
+
+        elif kind == "play":
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.NoPen)
+            painter.drawPolygon(QPolygonF([
+                QPointF(size * 0.30, size * 0.19),
+                QPointF(size * 0.30, size * 0.81),
+                QPointF(size * 0.78, size * 0.50),
+            ]))
+
+        elif kind == "download":
+            painter.drawLine(QPointF(size * 0.50, size * 0.13), QPointF(size * 0.50, size * 0.61))
+            painter.drawLine(QPointF(size * 0.31, size * 0.45), QPointF(size * 0.50, size * 0.65))
+            painter.drawLine(QPointF(size * 0.69, size * 0.45), QPointF(size * 0.50, size * 0.65))
+            painter.drawLine(QPointF(size * 0.21, size * 0.84), QPointF(size * 0.79, size * 0.84))
+            painter.drawLine(QPointF(size * 0.21, size * 0.84), QPointF(size * 0.21, size * 0.70))
+            painter.drawLine(QPointF(size * 0.79, size * 0.84), QPointF(size * 0.79, size * 0.70))
+
+        elif kind == "heart":
+            path = QPainterPath()
+            path.moveTo(size * 0.50, size * 0.82)
+            path.cubicTo(size * 0.08, size * 0.58, size * 0.16, size * 0.17, size * 0.38, size * 0.22)
+            path.cubicTo(size * 0.47, size * 0.24, size * 0.50, size * 0.34, size * 0.50, size * 0.34)
+            path.cubicTo(size * 0.50, size * 0.34, size * 0.53, size * 0.24, size * 0.62, size * 0.22)
+            path.cubicTo(size * 0.84, size * 0.17, size * 0.92, size * 0.58, size * 0.50, size * 0.82)
+            painter.setBrush(QBrush(color) if filled else Qt.NoBrush)
+            painter.drawPath(path)
+
+        elif kind == "comment":
+            bubble = QRectF(size * 0.15, size * 0.16, size * 0.69, size * 0.51)
+            painter.drawRoundedRect(bubble, size * 0.11, size * 0.11)
+            painter.drawLine(QPointF(size * 0.37, size * 0.67), QPointF(size * 0.31, size * 0.84))
+            painter.drawLine(QPointF(size * 0.31, size * 0.84), QPointF(size * 0.51, size * 0.69))
+
+        elif kind == "chevron":
+            painter.drawLine(QPointF(size * 0.36, size * 0.22), QPointF(size * 0.64, size * 0.50))
+            painter.drawLine(QPointF(size * 0.36, size * 0.78), QPointF(size * 0.64, size * 0.50))
+
+        elif kind == "window_minimize":
+            painter.setPen(QPen(color, max(1.7, size * 0.11), Qt.SolidLine, Qt.RoundCap))
+            painter.drawLine(
+                QPointF(size * 0.22, size * 0.66),
+                QPointF(size * 0.78, size * 0.66)
+            )
+
+        elif kind == "window_maximize":
+            painter.setPen(QPen(color, max(1.5, size * 0.10), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(
+                QRectF(size * 0.22, size * 0.20, size * 0.56, size * 0.56),
+                size * 0.04,
+                size * 0.04
+            )
+
+        elif kind == "window_close":
+            painter.setPen(QPen(color, max(1.7, size * 0.11), Qt.SolidLine, Qt.RoundCap))
+            painter.drawLine(
+                QPointF(size * 0.24, size * 0.24),
+                QPointF(size * 0.76, size * 0.76)
+            )
+            painter.drawLine(
+                QPointF(size * 0.76, size * 0.24),
+                QPointF(size * 0.24, size * 0.76)
+            )
+
+        elif kind == "players":
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(color))
+            painter.drawEllipse(
+                QRectF(size * 0.34, size * 0.12, size * 0.32, size * 0.32)
+            )
+            painter.drawRoundedRect(
+                QRectF(size * 0.22, size * 0.52, size * 0.56, size * 0.34),
+                size * 0.12,
+                size * 0.12
+            )
+
+        painter.end()
+        return pixmap
         
     # ===============================
     # DRAG WINDOW
@@ -1268,87 +1889,184 @@ class Launcher(QMainWindow):
     # ===============================
     # NEWS CARD REUTILIZABLE
     # ===============================
-    def create_news_card(self, news_item):
-        news_card = QFrame()
-        news_card.setFixedHeight(250)
-        news_card.setMinimumWidth(660)   # 🔧 evita que Qt comprima la card
-        news_card.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a22;
-                border-radius: 12px;
+    def create_news_card(self, news_item, compact=False):
+        """Card de noticias compartida por Inicio y la pestaña Noticias."""
+        card = QFrame()
+        card.setObjectName("newsFeedCard")
+        card.setFixedHeight(142 if compact else 188)
+        card.setMinimumWidth(620 if compact else 700)
+        card.setStyleSheet("""
+            #newsFeedCard {
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #141b27,
+                    stop:1 #101722
+                );
+                border:1px solid rgba(255,255,255,22);
+                border-radius:14px;
+            }
+            #newsFeedCard:hover {
+                border-color:rgba(103,116,255,105);
+                background:#151d2a;
             }
         """)
 
-        card_layout = QVBoxLayout(news_card)
-        card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(0)
+        root = QHBoxLayout(card)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # Imagen
-        pixmap = self.get_remote_pixmap(news_item["image"])
-        image_label = RoundedImage(pixmap, radius=12)
-        card_layout.addWidget(image_label)
+        card_height = 142 if compact else 188
 
-        black_height = 100
-        fade_height = 110
+        # Noticias destacadas conserva una miniatura horizontal grande.
+        # Solo las esquinas exteriores izquierdas siguen redondeadas.
+        image_width = 285 if compact else 340
 
-        black_bar = QFrame(news_card)
-        black_bar.setStyleSheet("""
-            background-color: rgb(0,0,0);
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
+        pixmap = self.get_remote_pixmap(news_item.get("image"))
+        image = RoundedImage(
+            pixmap,
+            radius=13,
+            round_mode="left"
+        )
+        image.setFixedSize(image_width, card_height)
+        image.setStyleSheet("background:transparent;border:none;")
+        root.addWidget(image)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(17, 13, 15, 12)
+        content.setSpacing(5)
+
+        title_text = news_item.get("title", "Novedades")
+        desc_text = news_item.get("description", "")
+        badge_text = str(
+            news_item.get("tag")
+            or news_item.get("category")
+            or ("EVENTO" if "evento" in title_text.lower() else "ACTUALIZACIÓN")
+        ).upper()
+        time_text = str(news_item.get("time_ago", "Novedad reciente"))
+        likes_value = int(news_item.get("likes", 0) or 0)
+        comments_value = int(news_item.get("comments", 0) or 0)
+
+        is_event = "EVENTO" in badge_text or "EVENT" in badge_text
+        badge_color = "#c183ff" if is_event else "#7c86ff"
+        badge_background = "rgba(167,92,255,35)" if is_event else "rgba(91,108,255,38)"
+        badge_border = "rgba(193,131,255,95)" if is_event else "rgba(124,134,255,95)"
+
+        top = QHBoxLayout()
+        top.setSpacing(8)
+
+        badge = QLabel(badge_text)
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setStyleSheet(f"""
+            color:{badge_color};
+            background:{badge_background};
+            border:1px solid {badge_border};
+            border-radius:7px;
+            padding:3px 7px;
+            font-size:9px;
+            font-weight:800;
         """)
 
-        fade_overlay = QFrame(news_card)
-        fade_overlay.setStyleSheet("""
-            background: qlineargradient(
-                x1:0, y1:0,
-                x2:0, y2:1,
-                stop:0 rgba(0,0,0,0),
-                stop:0.3 rgba(0,0,0,120),
-                stop:0.6 rgba(0,0,0,180),
-                stop:1 rgba(0,0,0,255)
-            );
+        when = QLabel(time_text)
+        when.setStyleSheet("color:#8c96aa;font-size:9px;border:none;")
+
+        top.addWidget(badge, alignment=Qt.AlignLeft)
+        top.addWidget(when, alignment=Qt.AlignVCenter)
+        top.addStretch()
+
+        title = QLabel(title_text)
+        title.setWordWrap(True)
+        title.setMaximumHeight(42 if compact else 48)
+        title.setStyleSheet("""
+            color:#f5f7ff;
+            font-size:12px;
+            font-weight:800;
+            border:none;
         """)
 
-        # Texto
-        overlay_layout = QVBoxLayout(black_bar)
-        overlay_layout.setContentsMargins(15, 10, 20, 10)
-        overlay_layout.setSpacing(5)
-
-        title = QLabel(news_item["title"])
-        title.setFont(QFont(self.montserrat, 14))
-        title.setStyleSheet("color: white;")
-
-        desc = QLabel(news_item["description"])
-        desc.setStyleSheet("color: #dddddd;")
+        desc = QLabel(desc_text)
         desc.setWordWrap(True)
+        desc.setMaximumHeight(34 if compact else 52)
+        desc.setStyleSheet("""
+            color:#a0aabd;
+            font-size:10px;
+            border:none;
+        """)
 
-        overlay_layout.addWidget(title)
-        overlay_layout.addWidget(desc)
+        actions = QHBoxLayout()
+        actions.setSpacing(2)
 
-        # Posicionamiento dinámico
-        def resize_overlays(event):
-            width = news_card.width()
-            height = news_card.height()
+        like_btn = QPushButton()
+        like_btn.setCheckable(True)
+        like_btn.setCursor(Qt.PointingHandCursor)
+        like_btn.setFixedSize(28, 26)
+        like_btn.setIcon(QIcon(self.make_icon("heart", 14, QColor("#8994aa"))))
+        like_btn.setIconSize(QSize(14, 14))
+        like_btn.setToolTip("Me gusta")
+        like_btn.setStyleSheet("""
+            QPushButton { background:transparent; border:none; border-radius:8px; }
+            QPushButton:hover { background:rgba(255,255,255,14); }
+            QPushButton:checked { background:rgba(255,86,126,24); }
+        """)
 
-            black_bar.setGeometry(
-                0,
-                height - black_height,
-                width,
-                black_height
-            )
+        like_count = QLabel(str(likes_value))
+        like_count.setMinimumWidth(24)
+        like_count.setStyleSheet("color:#8f99ad;font-size:9px;border:none;")
 
-            fade_overlay.setGeometry(
-                0,
-                height - black_height - fade_height + 20,  # 👈 ACÁ lo bajás
-                width,
-                fade_height
-            )
+        def toggle_like(checked):
+            like_btn.setIcon(QIcon(self.make_icon(
+                "heart", 14,
+                QColor("#ff668c") if checked else QColor("#8994aa"),
+                filled=checked
+            )))
+            like_count.setText(str(likes_value + (1 if checked else 0)))
 
-        news_card.resizeEvent = resize_overlays
+        like_btn.toggled.connect(toggle_like)
 
-        return news_card
-        
+        comment_btn = QPushButton()
+        comment_btn.setCursor(Qt.PointingHandCursor)
+        comment_btn.setFixedSize(28, 26)
+        comment_btn.setIcon(QIcon(self.make_icon("comment", 14, QColor("#8994aa"))))
+        comment_btn.setIconSize(QSize(14, 14))
+        comment_btn.setToolTip("Ver comentarios")
+        comment_btn.setStyleSheet("""
+            QPushButton { background:transparent; border:none; border-radius:8px; }
+            QPushButton:hover { background:rgba(255,255,255,14); }
+        """)
+        comment_btn.clicked.connect(lambda checked=False: self.switch_page(2))
+
+        comment_count = QLabel(str(comments_value))
+        comment_count.setMinimumWidth(24)
+        comment_count.setStyleSheet("color:#8f99ad;font-size:9px;border:none;")
+
+        open_btn = QPushButton()
+        open_btn.setCursor(Qt.PointingHandCursor)
+        open_btn.setFixedSize(30, 28)
+        open_btn.setIcon(QIcon(self.make_icon("chevron", 15, QColor("#c8d0df"))))
+        open_btn.setIconSize(QSize(15, 15))
+        open_btn.setToolTip("Abrir noticia")
+        open_btn.setStyleSheet("""
+            QPushButton { background:transparent; border:none; border-radius:9px; }
+            QPushButton:hover { background:rgba(255,255,255,14); }
+        """)
+        open_btn.clicked.connect(lambda checked=False: self.switch_page(2))
+
+        actions.addWidget(like_btn)
+        actions.addWidget(like_count)
+        actions.addSpacing(5)
+        actions.addWidget(comment_btn)
+        actions.addWidget(comment_count)
+        actions.addStretch()
+        actions.addWidget(open_btn)
+
+        content.addLayout(top)
+        content.addWidget(title)
+        content.addWidget(desc)
+        content.addStretch()
+        content.addLayout(actions)
+
+        root.addLayout(content, 1)
+        return card
+
     # ===============================
     # HOME PAGE
     # ===============================
@@ -1374,46 +2092,140 @@ class Launcher(QMainWindow):
         primary = self.servers_data.get(primary_name, {}) if primary_name else {}
         self.home_primary_name = primary_name
 
-        # HERO COMPACTO
+        # HERO: una sola imagen de fondo
         hero = QFrame()
         hero.setObjectName("hero")
-        hero.setMinimumHeight(205)
-        hero.setMaximumHeight(218)
+        hero.setFixedHeight(238)
         hero.setStyleSheet("""
             #hero {
-                background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #101a35,stop:0.55 #101a2b,stop:1 #1a1438);
-                border:1px solid rgba(91,108,255,80);
+                background:#0b111d;
+                border:1px solid rgba(91,108,255,70);
                 border-radius:16px;
             }
         """)
-        hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(34, 22, 20, 18)
-        hero_layout.setSpacing(24)
+
+        hero_stack = QStackedLayout(hero)
+        hero_stack.setStackingMode(QStackedLayout.StackAll)
+        hero_stack.setContentsMargins(0, 0, 0, 0)
+
+        hero_pm = self.get_remote_asset("hero_banner.png")
+        if (not hero_pm or hero_pm.isNull()) and self.news_data:
+            hero_pm = self.get_remote_pixmap(self.news_data[0].get("image"))
+
+        hero_bg = RoundedImage(hero_pm, radius=16)
+        hero_bg.setMinimumHeight(238)
+        hero_bg.setMaximumHeight(238)
+        hero_bg.setStyleSheet("background:transparent;border:none;")
+        hero_stack.addWidget(hero_bg)
+
+        hero_overlay = QFrame()
+        hero_overlay.setObjectName("heroOverlay")
+        hero_overlay.setStyleSheet("""
+            #heroOverlay {
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(3,6,12,245),
+                    stop:0.34 rgba(3,6,12,215),
+                    stop:0.60 rgba(3,6,12,95),
+                    stop:1 rgba(3,6,12,10)
+                );
+                border-radius:16px;
+            }
+        """)
+        hero_stack.addWidget(hero_overlay)
+
+        # En StackAll, el widget actual queda por encima del resto.
+        # Marcamos el overlay como actual para que el texto y los botones
+        # aparezcan delante de la imagen de fondo.
+        hero_stack.setCurrentWidget(hero_overlay)
+        hero_bg.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        hero_overlay.raise_()
+
+        hero_layout = QHBoxLayout(hero_overlay)
+        hero_layout.setContentsMargins(38, 25, 30, 23)
 
         left = QVBoxLayout()
-        left.setSpacing(6)
+        left.setSpacing(5)
+
         eyebrow = QLabel("D0CCTOR'S HUB")
-        eyebrow.setStyleSheet("color:#7f8cff;font-size:11px;font-weight:700;letter-spacing:2px;border:none;")
-        hero_title = QLabel("EXPLORÁ. CONSTRUÍ. <span style='color:#6d78ff'>SOBREVIVÍ.</span>")
+        eyebrow.setStyleSheet(
+            "color:#8993ff;font-size:10px;font-weight:800;"
+            "letter-spacing:2px;border:none;"
+        )
+
+        hero_title = QLabel(
+            "EXPLORÁ.<br>CONSTRUÍ. "
+            "<span style='color:#7580ff'>SOBREVIVÍ.</span>"
+        )
         hero_title.setTextFormat(Qt.RichText)
         hero_title.setWordWrap(True)
+        hero_title.setMaximumWidth(540)
         hero_title.setFont(QFont(self.montserrat, 23, QFont.Weight.Bold))
         hero_title.setStyleSheet("color:white;border:none;")
-        hero_sub = QLabel("Jugá, instalá y actualizá tus servidores desde un único launcher.")
+
+        hero_sub = QLabel(
+            "Jugá, instalá y actualizá tus servidores desde un único launcher."
+        )
         hero_sub.setWordWrap(True)
-        hero_sub.setMaximumWidth(520)
-        hero_sub.setStyleSheet("color:#aeb7cc;font-size:12px;border:none;")
+        hero_sub.setMaximumWidth(470)
+        hero_sub.setStyleSheet("color:#b2bdd1;font-size:11px;border:none;")
 
         actions = QHBoxLayout()
-        actions.setSpacing(10)
-        play_btn = QPushButton("▶   JUGAR")
-        play_btn.setFixedSize(168, 46)
+        actions.setSpacing(11)
+
+        play_btn = QPushButton("JUGAR")
+        play_btn.setFixedSize(178, 48)
         play_btn.setCursor(Qt.PointingHandCursor)
-        play_btn.setStyleSheet("QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4d5cff,stop:1 #765cff);color:white;border:none;border-radius:13px;font-size:15px;font-weight:750;} QPushButton:hover{background:#6873ff;} QPushButton:disabled{background:#343b61;color:#8991ad;}")
-        install_btn = QPushButton("⇩   INSTALAR")
-        install_btn.setFixedSize(164, 46)
+        play_btn.setIcon(QIcon(self.make_icon("play", 19, QColor("#ffffff"), filled=True)))
+        play_btn.setIconSize(QSize(19, 19))
+        play_btn.setStyleSheet("""
+            QPushButton {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #5361ff,
+                    stop:1 #7561ff
+                );
+                color:white;
+                border:1px solid rgba(151,158,255,125);
+                border-radius:13px;
+                font-size:14px;
+                font-weight:800;
+                padding:0 16px;
+            }
+            QPushButton:hover { background:#6873ff; }
+            QPushButton:pressed { background:#4d59df; }
+            QPushButton:disabled {
+                background:#303750;
+                color:#7f899e;
+                border-color:rgba(255,255,255,18);
+            }
+        """)
+
+        install_btn = QPushButton("INSTALAR")
+        install_btn.setFixedSize(178, 48)
         install_btn.setCursor(Qt.PointingHandCursor)
-        install_btn.setStyleSheet("QPushButton{background:rgba(6,10,20,185);color:#edf0f8;border:1px solid rgba(255,255,255,38);border-radius:13px;font-size:13px;font-weight:700;} QPushButton:hover{border-color:#6875ff;background:rgba(25,32,60,220);}")
+        install_btn.setIcon(QIcon(self.make_icon("download", 19, QColor("#eef1fa"))))
+        install_btn.setIconSize(QSize(19, 19))
+        install_btn.setStyleSheet("""
+            QPushButton {
+                background:rgba(8,13,23,225);
+                color:#eef1fa;
+                border:1px solid rgba(255,255,255,38);
+                border-radius:13px;
+                font-size:13px;
+                font-weight:750;
+                padding:0 16px;
+            }
+            QPushButton:hover {
+                border-color:#6f7aff;
+                background:rgba(25,32,60,235);
+            }
+            QPushButton:pressed { background:#151d35; }
+            QPushButton:disabled {
+                color:#7f899e;
+                background:rgba(20,25,38,215);
+            }
+        """)
 
         self.home_play_btn = play_btn
         self.home_install_btn = install_btn
@@ -1421,11 +2233,20 @@ class Launcher(QMainWindow):
         installed = bool(primary.get("installed"))
         needs_update = bool(primary.get("needs_update"))
         play_btn.setEnabled(installed and not needs_update)
-        install_btn.setText("↻   ACTUALIZAR" if needs_update else ("✓   INSTALADO" if installed else "⇩   INSTALAR"))
+        install_btn.setText(
+            "ACTUALIZAR" if needs_update
+            else ("INSTALADO" if installed else "INSTALAR")
+        )
         install_btn.setEnabled((not installed) or needs_update)
+
         if primary_name:
-            play_btn.clicked.connect(lambda checked=False, n=primary_name: self.handle_server_action(n))
-            install_btn.clicked.connect(lambda checked=False, n=primary_name: self.handle_server_action(n))
+            play_btn.clicked.connect(
+                lambda checked=False, n=primary_name: self.handle_server_action(n)
+            )
+            install_btn.clicked.connect(
+                lambda checked=False, n=primary_name: self.handle_server_action(n)
+            )
+
         actions.addWidget(play_btn)
         actions.addWidget(install_btn)
         actions.addStretch()
@@ -1436,18 +2257,9 @@ class Launcher(QMainWindow):
         left.addSpacing(8)
         left.addLayout(actions)
         left.addStretch()
-        hero_layout.addLayout(left, 5)
 
-        art = QLabel()
-        art.setObjectName("heroArt")
-        art.setMinimumWidth(270)
-        art.setMaximumWidth(360)
-        art.setAlignment(Qt.AlignCenter)
-        art.setStyleSheet("#heroArt{background:rgba(4,7,14,80);border:1px solid rgba(255,255,255,20);border-radius:14px;}")
-        hero_pm = self.get_remote_asset("minecraft.png")
-        if hero_pm and not hero_pm.isNull():
-            art.setPixmap(hero_pm.scaled(220, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        hero_layout.addWidget(art, 3)
+        hero_layout.addLayout(left, 5)
+        hero_layout.addStretch(3)
         layout.addWidget(hero)
 
         # SERVIDORES
@@ -1472,36 +2284,191 @@ class Launcher(QMainWindow):
 
         cards = QHBoxLayout()
         cards.setSpacing(10)
+
         for server_name, data in list(self.servers_data.items())[:4]:
+            # Los valores reales llegan desde ServerStatusWorker.
+            server_status = "maintenance" if data.get("maintenance") else "offline"
+            players_online = 0
+            players_max = int(data.get("players_max", 0) or 0)
+            ping = None
+
+            status_styles = {
+                "online": {
+                    "text": "En línea",
+                    "color": "#55dc7a",
+                    "dot": "#55dc7a",
+                },
+                "offline": {
+                    "text": "Offline",
+                    "color": "#ff6674",
+                    "dot": "#ff6674",
+                },
+                "maintenance": {
+                    "text": "Mantenimiento",
+                    "color": "#f5bf57",
+                    "dot": "#f5bf57",
+                },
+            }
+            status_info = status_styles.get(
+                server_status,
+                status_styles["offline"]
+            )
+
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setMinimumHeight(80)
-            card.setStyleSheet("#homeServerCard{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:13px;} #homeServerCard:hover{border-color:rgba(91,108,255,95);}")
-            row = QHBoxLayout(card)
-            row.setContentsMargins(12, 11, 12, 11)
-            row.setSpacing(10)
+            card.setMinimumHeight(92)
+            card.setStyleSheet("""
+                #homeServerCard {
+                    background:qlineargradient(
+                        x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #111821,
+                        stop:1 #0c121b
+                    );
+                    border:1px solid rgba(255,255,255,22);
+                    border-radius:13px;
+                }
+                #homeServerCard:hover {
+                    border-color:rgba(91,108,255,95);
+                    background:#121a26;
+                }
+            """)
+
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(11, 10, 11, 8)
+            card_layout.setSpacing(5)
+
+            top_row = QHBoxLayout()
+            top_row.setSpacing(10)
+
             icon = QLabel()
-            icon.setFixedSize(50,50)
+            icon.setFixedSize(52, 52)
             icon.setAlignment(Qt.AlignCenter)
-            icon.setStyleSheet("background:#111a2b;border-radius:11px;border:none;")
+            icon.setStyleSheet("""
+                background:#111a2b;
+                border:1px solid rgba(255,255,255,18);
+                border-radius:11px;
+            """)
+
             pm = self.get_remote_pixmap(data.get("image_url"))
             if pm and not pm.isNull():
-                icon.setPixmap(pm.scaled(44,44,Qt.KeepAspectRatio,Qt.SmoothTransformation))
-            txt = QVBoxLayout()
-            txt.setSpacing(1)
+                icon.setPixmap(
+                    pm.scaled(
+                        46, 46,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                )
+
+            info_layout = QVBoxLayout()
+            info_layout.setSpacing(1)
+
             name = QLabel(server_name)
-            name.setStyleSheet("color:white;font-size:12px;font-weight:700;border:none;")
-            ver = QLabel(str(data.get("minecraft_version") or "Steam"))
-            ver.setStyleSheet("color:#7f899f;font-size:10px;border:none;")
-            state = QLabel("●  Disponible")
-            state.setStyleSheet("color:#49d17d;font-size:10px;border:none;")
-            txt.addWidget(name)
-            txt.addWidget(ver)
-            txt.addStretch()
-            txt.addWidget(state)
-            row.addWidget(icon)
-            row.addLayout(txt)
-            cards.addWidget(card,1)
+            name.setStyleSheet("""
+                color:#f5f7ff;
+                font-size:12px;
+                font-weight:750;
+                border:none;
+            """)
+
+            version_text = str(
+                data.get("minecraft_version")
+                or data.get("version")
+                or "Steam"
+            )
+            version = QLabel(version_text)
+            version.setStyleSheet("""
+                color:#7f899d;
+                font-size:9px;
+                border:none;
+            """)
+
+            metrics_row = QHBoxLayout()
+            metrics_row.setSpacing(5)
+
+            state_dot = QLabel("●")
+            state_dot.setStyleSheet(
+                f"color:{status_info['dot']};"
+                "font-size:9px;border:none;"
+            )
+
+            state_label = QLabel(status_info["text"])
+            state_label.setStyleSheet(
+                f"color:{status_info['color']};"
+                "font-size:9px;font-weight:650;border:none;"
+            )
+
+            metrics_row.addWidget(state_dot)
+            metrics_row.addWidget(state_label)
+            metrics_row.addStretch()
+
+            info_layout.addWidget(name)
+            info_layout.addWidget(version)
+            info_layout.addStretch()
+            info_layout.addLayout(metrics_row)
+
+            top_row.addWidget(icon)
+            top_row.addLayout(info_layout, 1)
+
+            bottom_row = QHBoxLayout()
+            bottom_row.setContentsMargins(62, 0, 0, 0)
+            bottom_row.setSpacing(5)
+
+            players_icon = QLabel()
+            players_icon.setFixedSize(13, 13)
+            players_icon.setPixmap(
+                self.make_icon("players", 12, QColor("#a9b2c5"))
+            )
+            players_icon.setAlignment(Qt.AlignCenter)
+            players_icon.setStyleSheet("background:transparent;border:none;")
+
+            if players_max > 0:
+                players_text = f"{players_online}/{players_max}"
+            elif server_status == "maintenance":
+                players_text = "0/0"
+            else:
+                players_text = str(players_online)
+
+            players_label = QLabel(players_text)
+            players_label.setStyleSheet("""
+                color:#aab3c5;
+                font-size:9px;
+                border:none;
+            """)
+
+            bottom_row.addWidget(players_icon)
+            bottom_row.addWidget(players_label)
+            bottom_row.addStretch()
+
+            if server_status == "online" and ping is not None:
+                ping_label = QLabel(f"{int(ping)}ms")
+                ping_label.setStyleSheet("""
+                    color:#59da72;
+                    font-size:9px;
+                    font-weight:650;
+                    border:none;
+                """)
+            else:
+                ping_label = QLabel("—")
+                ping_label.setStyleSheet("""
+                    color:#687286;
+                    font-size:10px;
+                    border:none;
+                """)
+
+            bottom_row.addWidget(ping_label)
+
+            self.home_server_status_widgets[server_name] = {
+                "state_dot": state_dot,
+                "state_label": state_label,
+                "players_label": players_label,
+                "ping_label": ping_label,
+                "version_label": version,
+            }
+
+            card_layout.addLayout(top_row)
+            card_layout.addLayout(bottom_row)
+            cards.addWidget(card, 1)
+
         layout.addLayout(cards)
 
         # NOTICIAS + ACTIVIDAD RECIENTE
@@ -1525,92 +2492,15 @@ class Launcher(QMainWindow):
         news_col.addLayout(news_head)
 
         if self.news_data:
-            news_items = self.news_data[:2]
-
-            for index, item in enumerate(news_items):
-                news_card = QFrame()
-                news_card.setObjectName(f"featuredNews{index}")
-                news_card.setFixedHeight(135)
-                news_card.setStyleSheet(
-                    "QFrame {"
-                    "background:#0d131e;"
-                    "border:1px solid rgba(255,255,255,22);"
-                    "border-radius:12px;"
-                    "}"
-                )
-
-                nrow = QHBoxLayout(news_card)
-                nrow.setContentsMargins(0, 0, 0, 0)
-                nrow.setSpacing(0)
-
-                image = QLabel()
-                image.setFixedWidth(320)
-                image.setAlignment(Qt.AlignCenter)
-                image.setStyleSheet(
-                    "background:#101827;"
-                    "border-top-left-radius:12px;"
-                    "border-bottom-left-radius:12px;"
-                    "border:none;"
-                )
-
-                npm = self.get_remote_pixmap(item.get("image"))
-                if npm and not npm.isNull():
-                    image.setPixmap(
-                        npm.scaled(
-                            320,
-                            135,
-                            Qt.KeepAspectRatioByExpanding,
-                            Qt.SmoothTransformation
-                        )
-                    )
-
-                ntext = QVBoxLayout()
-                ntext.setContentsMargins(16, 10, 16, 9)
-                ntext.setSpacing(4)
-
-                badge_text = "DESTACADA" if index == 0 else "NOVEDAD"
-                badge = QLabel(badge_text)
-                badge.setStyleSheet(
-                    "color:#777fff;"
-                    "font-size:10px;"
-                    "font-weight:700;"
-                    "border:none;"
-                )
-
-                nt = QLabel(item.get("title", "Novedades"))
-                nt.setWordWrap(True)
-                nt.setMaximumHeight(44)
-                nt.setStyleSheet(
-                    "color:white;"
-                    "font-size:12px;"
-                    "font-weight:700;"
-                    "border:none;"
-                )
-
-                nd = QLabel(item.get("description", ""))
-                nd.setWordWrap(True)
-                nd.setMaximumHeight(34)
-                nd.setStyleSheet(
-                    "color:#8f99ad;"
-                    "font-size:10px;"
-                    "border:none;"
-                )
-
-                ntext.addWidget(badge)
-                ntext.addWidget(nt)
-                ntext.addWidget(nd)
-                ntext.addStretch()
-
-                nrow.addWidget(image)
-                nrow.addLayout(ntext, 1)
-                news_col.addWidget(news_card)
+            for item in self.news_data[:2]:
+                news_col.addWidget(self.create_news_card(item, compact=True))
 
         activity = QFrame()
         activity.setObjectName("activityPanel")
         activity.setMinimumWidth(230)
         activity.setMaximumWidth(260)
-        activity.setMinimumHeight(310)
-        activity.setMaximumHeight(310)
+        activity.setMinimumHeight(325)
+        activity.setMaximumHeight(325)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
         act.setContentsMargins(16,12,16,12)
@@ -1892,13 +2782,39 @@ class Launcher(QMainWindow):
         layout.setContentsMargins(40, 20, 40, 30)
         layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
 
-        title = QLabel("Noticias")
-        title.setFont(QFont(self.montserrat, 16))
-        title.setStyleSheet("color: white;")
-        layout.addWidget(title)
+        header_card = QFrame()
+        header_card.setObjectName("newsPageHeader")
+        header_card.setStyleSheet("""
+            #newsPageHeader {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #131b2a,
+                    stop:1 #0d1420
+                );
+                border:1px solid rgba(91,108,255,55);
+                border-radius:15px;
+            }
+        """)
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(20, 17, 20, 17)
+        header_layout.setSpacing(5)
+
+        title = QLabel("NOTICIAS DE LA COMUNIDAD")
+        title.setFont(QFont(self.montserrat, 17, QFont.Weight.Bold))
+        title.setStyleSheet("color:#f5f7ff;letter-spacing:1px;border:none;")
+
+        subtitle = QLabel(
+            "Actualizaciones, eventos y novedades de D0cCtor's Hub y sus servidores."
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color:#96a1b6;font-size:11px;border:none;")
+
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        layout.addWidget(header_card)
 
         for news in self.news_data:
-            layout.addWidget(self.create_news_card(news))
+            layout.addWidget(self.create_news_card(news, compact=False))
 
         layout.addStretch()
 
@@ -2098,6 +3014,68 @@ class Launcher(QMainWindow):
 
         return page
         
+
+    # ===============================
+    # STORE PAGE
+    # ===============================
+    def create_store_page(self):
+        page = QWidget()
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(40, 20, 40, 30)
+
+        main_layout.addStretch()
+
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background:qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #111826,
+                    stop:1 #0b121d
+                );
+                border:1px solid rgba(255,255,255,22);
+                border-radius:18px;
+            }
+        """)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(32, 32, 32, 32)
+        card_layout.setSpacing(14)
+        card_layout.setAlignment(Qt.AlignCenter)
+
+        icon = QLabel()
+        icon.setFixedSize(68, 68)
+        icon.setPixmap(self.make_icon("store", 36, QColor("#7a83ff")))
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setStyleSheet("""
+            background:rgba(122,131,255,0.10);
+            border:1px solid rgba(122,131,255,0.22);
+            border-radius:18px;
+        """)
+
+        title = QLabel("Tienda próximamente")
+        title.setFont(QFont(self.montserrat, 20, QFont.Weight.Bold))
+        title.setStyleSheet("color:white;border:none;")
+        title.setAlignment(Qt.AlignCenter)
+
+        desc = QLabel(
+            "Esta sección va a quedar preparada para cosméticos, rangos y otros extras.\n"
+            "Por ahora la dejamos con la misma línea visual del launcher."
+        )
+        desc.setWordWrap(True)
+        desc.setMaximumWidth(560)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("color:#9aa6bc;font-size:12px;border:none;")
+
+        card_layout.addWidget(icon)
+        card_layout.addWidget(title)
+        card_layout.addWidget(desc)
+
+        main_layout.addWidget(card)
+        main_layout.addStretch()
+
+        return page
+
     def handle_server_action(self, server_name):
 
         # ===== REINSTALAR MODS =====
@@ -2345,13 +3323,13 @@ class Launcher(QMainWindow):
         play_btn.setEnabled(installed and not needs_update)
 
         if needs_update:
-            install_btn.setText("↻   ACTUALIZAR")
+            install_btn.setText("ACTUALIZAR")
             install_btn.setEnabled(True)
         elif installed:
-            install_btn.setText("✓   INSTALADO")
+            install_btn.setText("INSTALADO")
             install_btn.setEnabled(False)
         else:
-            install_btn.setText("⇩   INSTALAR")
+            install_btn.setText("INSTALAR")
             install_btn.setEnabled(True)
 
         play_btn.update()
@@ -2441,16 +3419,45 @@ class Launcher(QMainWindow):
         if index == 0:
             QTimer.singleShot(0, self._refresh_home_layout)
 
-        nav_buttons = [self.btn_inicio, self.btn_servers, self.btn_news, self.btn_settings, self.btn_support]
+        nav_buttons = [
+            self.btn_inicio,
+            self.btn_servers,
+            self.btn_news,
+            self.btn_settings,
+            self.btn_support,
+            self.btn_store,
+        ]
         for i, button in enumerate(nav_buttons):
-            if i == index:
+            is_active = i == index
+            self.update_nav_icon(button, active=is_active)
+
+            if is_active:
                 button.setStyleSheet("""
-                    QPushButton { background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(75,88,255,90),stop:1 rgba(92,70,190,55)); color:white; border:1px solid rgba(103,116,255,150); border-radius:12px; text-align:left; padding-left:18px; font-weight:650; }
+                    QPushButton {
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(75,88,255,90),stop:1 rgba(92,70,190,55));
+                        color:white;
+                        border:1px solid rgba(103,116,255,150);
+                        border-radius:14px;
+                        text-align:left;
+                        padding-left:16px;
+                        font-weight:650;
+                    }
                 """)
             else:
                 button.setStyleSheet("""
-                    QPushButton { background:transparent; color:#aeb7cc; border:1px solid transparent; border-radius:12px; text-align:left; padding-left:18px; }
-                    QPushButton:hover { background-color:rgba(91,108,255,28); color:white; border-color:rgba(91,108,255,70); }
+                    QPushButton {
+                        background:transparent;
+                        color:#aeb7cc;
+                        border:1px solid transparent;
+                        border-radius:14px;
+                        text-align:left;
+                        padding-left:16px;
+                    }
+                    QPushButton:hover {
+                        background-color:rgba(91,108,255,28);
+                        color:white;
+                        border-color:rgba(91,108,255,70);
+                    }
                 """)
 
         if not animate:

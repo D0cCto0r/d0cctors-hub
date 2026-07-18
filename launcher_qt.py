@@ -2316,7 +2316,7 @@ class Launcher(QMainWindow):
 
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setMinimumHeight(92)
+            card.setFixedSize(245, 92)
             card.setStyleSheet("""
                 #homeServerCard {
                     background:qlineargradient(
@@ -2333,12 +2333,9 @@ class Launcher(QMainWindow):
                 }
             """)
 
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(11, 10, 11, 8)
-            card_layout.setSpacing(5)
-
-            top_row = QHBoxLayout()
-            top_row.setSpacing(10)
+            card_layout = QHBoxLayout(card)
+            card_layout.setContentsMargins(10, 9, 10, 9)
+            card_layout.setSpacing(9)
 
             icon = QLabel()
             icon.setFixedSize(52, 52)
@@ -2346,7 +2343,7 @@ class Launcher(QMainWindow):
             icon.setStyleSheet("""
                 background:#111a2b;
                 border:1px solid rgba(255,255,255,18);
-                border-radius:11px;
+                border-radius:10px;
             """)
 
             pm = self.get_remote_pixmap(data.get("image_url"))
@@ -2359,8 +2356,15 @@ class Launcher(QMainWindow):
                     )
                 )
 
-            info_layout = QVBoxLayout()
-            info_layout.setSpacing(1)
+            content = QVBoxLayout()
+            content.setSpacing(2)
+            content.setContentsMargins(0, 0, 0, 0)
+
+            header_row = QHBoxLayout()
+            header_row.setSpacing(6)
+
+            title_block = QVBoxLayout()
+            title_block.setSpacing(0)
 
             name = QLabel(server_name)
             name.setStyleSheet("""
@@ -2378,45 +2382,21 @@ class Launcher(QMainWindow):
             version = QLabel(version_text)
             version.setStyleSheet("""
                 color:#7f899d;
-                font-size:9px;
+                font-size:10px;
                 border:none;
             """)
 
-            metrics_row = QHBoxLayout()
-            metrics_row.setSpacing(5)
+            title_block.addWidget(name)
+            title_block.addWidget(version)
 
-            state_dot = QLabel("●")
-            state_dot.setStyleSheet(
-                f"color:{status_info['dot']};"
-                "font-size:9px;border:none;"
-            )
-
-            state_label = QLabel(status_info["text"])
-            state_label.setStyleSheet(
-                f"color:{status_info['color']};"
-                "font-size:9px;font-weight:650;border:none;"
-            )
-
-            metrics_row.addWidget(state_dot)
-            metrics_row.addWidget(state_label)
-            metrics_row.addStretch()
-
-            info_layout.addWidget(name)
-            info_layout.addWidget(version)
-            info_layout.addStretch()
-            info_layout.addLayout(metrics_row)
-
-            top_row.addWidget(icon)
-            top_row.addLayout(info_layout, 1)
-
-            bottom_row = QHBoxLayout()
-            bottom_row.setContentsMargins(62, 0, 0, 0)
-            bottom_row.setSpacing(5)
+            players_box = QHBoxLayout()
+            players_box.setSpacing(4)
+            players_box.setContentsMargins(0, 1, 0, 0)
 
             players_icon = QLabel()
-            players_icon.setFixedSize(13, 13)
+            players_icon.setFixedSize(14, 14)
             players_icon.setPixmap(
-                self.make_icon("players", 12, QColor("#a9b2c5"))
+                self.make_icon("players", 13, QColor("#a9b2c5"))
             )
             players_icon.setAlignment(Qt.AlignCenter)
             players_icon.setStyleSheet("background:transparent;border:none;")
@@ -2431,20 +2411,39 @@ class Launcher(QMainWindow):
             players_label = QLabel(players_text)
             players_label.setStyleSheet("""
                 color:#aab3c5;
-                font-size:9px;
+                font-size:10px;
+                font-weight:600;
                 border:none;
             """)
 
-            bottom_row.addWidget(players_icon)
-            bottom_row.addWidget(players_label)
-            bottom_row.addStretch()
+            players_box.addWidget(players_icon)
+            players_box.addWidget(players_label)
+
+            header_row.addLayout(title_block)
+            header_row.addStretch()
+            header_row.addLayout(players_box)
+
+            footer_row = QHBoxLayout()
+            footer_row.setSpacing(4)
+
+            state_dot = QLabel("●")
+            state_dot.setStyleSheet(
+                f"color:{status_info['dot']};"
+                "font-size:10px;border:none;"
+            )
+
+            state_label = QLabel(status_info["text"])
+            state_label.setStyleSheet(
+                f"color:{status_info['color']};"
+                "font-size:10px;font-weight:700;border:none;"
+            )
 
             if server_status == "online" and ping is not None:
                 ping_label = QLabel(f"{int(ping)}ms")
                 ping_label.setStyleSheet("""
                     color:#59da72;
-                    font-size:9px;
-                    font-weight:650;
+                    font-size:10px;
+                    font-weight:700;
                     border:none;
                 """)
             else:
@@ -2455,7 +2454,17 @@ class Launcher(QMainWindow):
                     border:none;
                 """)
 
-            bottom_row.addWidget(ping_label)
+            footer_row.addWidget(state_dot)
+            footer_row.addWidget(state_label)
+            footer_row.addStretch()
+            footer_row.addWidget(ping_label)
+
+            content.addLayout(header_row)
+            content.addStretch()
+            content.addLayout(footer_row)
+
+            card_layout.addWidget(icon)
+            card_layout.addLayout(content, 1)
 
             self.home_server_status_widgets[server_name] = {
                 "state_dot": state_dot,
@@ -2465,10 +2474,9 @@ class Launcher(QMainWindow):
                 "version_label": version,
             }
 
-            card_layout.addLayout(top_row)
-            card_layout.addLayout(bottom_row)
-            cards.addWidget(card, 1)
+            cards.addWidget(card)
 
+        cards.addStretch()
         layout.addLayout(cards)
 
         # NOTICIAS + ACTIVIDAD RECIENTE

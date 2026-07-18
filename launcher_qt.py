@@ -1610,7 +1610,7 @@ class Launcher(QMainWindow):
         activity.setMinimumWidth(230)
         activity.setMaximumWidth(260)
         activity.setMinimumHeight(320)
-        activity.setMaximumHeight(320))
+        activity.setMaximumHeight(320)
         activity.setStyleSheet("#activityPanel{background:#0d131e;border:1px solid rgba(255,255,255,22);border-radius:14px;}")
         act = QVBoxLayout(activity)
         act.setContentsMargins(16,12,16,12)

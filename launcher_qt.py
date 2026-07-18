@@ -3,21 +3,30 @@ APP_STAGE = "Beta"
 APP_BUILD = "2026.6.5"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
+DEFAULT_ACCOUNT_API_URL = "http://127.0.0.1:8000"
+ACCOUNT_HEALTH_INTERVAL_MS = 30000
+
+REMOTE_LAUNCHER_CONFIG_URL = (
+    "https://raw.githubusercontent.com/"
+    "D0cCto0r/d0cctors-hub/main/launcher_config.json"
+)
+REMOTE_CONFIG_TIMEOUT_SECONDS = 6
+
 # ===============================
 # PALETA VISUAL DEL LAUNCHER
 # ===============================
-COLOR_BG = "#04080c"
-COLOR_BG_SECONDARY = "#0e1529"
+COLOR_BG = "#070b12"
+COLOR_BG_SECONDARY = "#0b111a"
 COLOR_SIDEBAR_TOP = "#0b1019"
 COLOR_SIDEBAR_MIDDLE = "#080d15"
 COLOR_SIDEBAR_BOTTOM = "#070b11"
 
-COLOR_CARD = "#0e1529"
+COLOR_CARD = "#121923"
 COLOR_CARD_DARK = "#0d131c"
 COLOR_CARD_HOVER = "#151d29"
 
-COLOR_BORDER = "rgba(19, 28, 31)"
-COLOR_BORDER_STRONG = "rgba(19, 28, 31)"
+COLOR_BORDER = "rgba(255,255,255,22)"
+COLOR_BORDER_STRONG = "rgba(255,255,255,32)"
 COLOR_BORDER_HOVER = "rgba(125,115,255,125)"
 
 COLOR_PRIMARY = "#6c63ff"
@@ -58,13 +67,15 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QFrame, QComboBox, QFileDialog, QScrollArea,
-    QStackedLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QSizePolicy
+    QStackedLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QSizePolicy,
+    QLineEdit, QTabWidget
 )
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QPointF, QRectF, QSize
 from PySide6.QtGui import QFont, QIcon, QPen, QPolygonF
 from PySide6.QtSvg import QSvgRenderer
 from config_manager import ConfigManager
 import requests
+import re
 import minecraft_launcher_lib
 import psutil
 import subprocess
@@ -346,16 +357,43 @@ class RoundedImage(QLabel):
         painter.fillPath(path, self.background_color)
 
         if self.pixmap_original and not self.pixmap_original.isNull():
-            scaled = self.pixmap_original.scaled(
-                self.width(),
-                self.height(),
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation
+            source_width = self.pixmap_original.width()
+            source_height = self.pixmap_original.height()
+            target_width = max(1, self.width())
+            target_height = max(1, self.height())
+
+            source_ratio = source_width / source_height
+            target_ratio = target_width / target_height
+
+            if source_ratio > target_ratio:
+                crop_height = source_height
+                crop_width = crop_height * target_ratio
+                crop_x = (source_width - crop_width) / 2
+                crop_y = 0
+            else:
+                crop_width = source_width
+                crop_height = crop_width / target_ratio
+                crop_x = 0
+                crop_y = (source_height - crop_height) / 2
+
+            source_rect = QRectF(
+                crop_x,
+                crop_y,
+                crop_width,
+                crop_height
+            )
+            target_rect = QRectF(self.rect())
+
+            painter.setRenderHint(
+                QPainter.SmoothPixmapTransform,
+                True
             )
 
-            x = (self.width() - scaled.width()) // 2
-            y = (self.height() - scaled.height()) // 2
-            painter.drawPixmap(x, y, scaled)
+            painter.drawPixmap(
+                target_rect,
+                self.pixmap_original,
+                source_rect
+            )
             
             
 from PySide6.QtCore import QThread, Signal
@@ -710,6 +748,125 @@ class ServerStatusWorker(QThread):
                 if not self._running:
                     return
                 self.msleep(100)
+
+
+class AccountApiWorker(QThread):
+    """Ejecuta solicitudes de cuenta sin bloquear la interfaz."""
+
+    success = Signal(object)
+    failure = Signal(str)
+    unauthorized = Signal()
+    completed = Signal()
+
+    def __init__(
+        self,
+        method,
+        endpoint,
+        *,
+        base_url,
+        json_payload=None,
+        headers=None,
+        timeout=12,
+    ):
+        super().__init__()
+        self.method = method.upper()
+        self.endpoint = endpoint
+        self.base_url = base_url.rstrip("/")
+        self.json_payload = json_payload
+        self.headers = headers or {}
+        self.timeout = timeout
+
+    def run(self):
+        try:
+            response = requests.request(
+                self.method,
+                f"{self.base_url}{self.endpoint}",
+                json=self.json_payload,
+                headers=self.headers,
+                timeout=self.timeout,
+            )
+
+            if response.status_code >= 400:
+                if response.status_code in (401, 403):
+                    self.unauthorized.emit()
+
+                try:
+                    payload = response.json()
+                    detail = payload.get(
+                        "detail",
+                        f"Error HTTP {response.status_code}"
+                    )
+
+                    if isinstance(detail, list) and detail:
+                        detail = detail[0].get(
+                            "msg",
+                            "Datos inválidos."
+                        )
+                except Exception:
+                    detail = f"Error HTTP {response.status_code}"
+
+                self.failure.emit(str(detail))
+                return
+
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+
+            self.success.emit(payload)
+
+        except requests.Timeout:
+            self.failure.emit(
+                "La API tardó demasiado en responder. "
+                "Comprobá que siga ejecutándose."
+            )
+        except requests.ConnectionError:
+            self.failure.emit(
+                "No se pudo conectar con la API. "
+                "Comprobá que el servidor esté iniciado."
+            )
+        except requests.RequestException as exc:
+            self.failure.emit(f"Error de conexión: {exc}")
+        finally:
+            self.completed.emit()
+
+
+class RemoteConfigWorker(QThread):
+    success = Signal(object)
+    failure = Signal(str)
+    completed = Signal()
+
+    def run(self):
+        try:
+            response = requests.get(
+                REMOTE_LAUNCHER_CONFIG_URL,
+                timeout=REMOTE_CONFIG_TIMEOUT_SECONDS,
+                headers={
+                    "User-Agent": "D0cCtors-Hub-Launcher"
+                },
+            )
+            response.raise_for_status()
+
+            payload = response.json()
+
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    "La configuración remota no es un objeto JSON."
+                )
+
+            self.success.emit(payload)
+
+        except requests.RequestException as exc:
+            self.failure.emit(
+                f"No se pudo descargar la configuración remota: {exc}"
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.failure.emit(
+                f"La configuración remota no es válida: {exc}"
+            )
+        finally:
+            self.completed.emit()
+
 
 class Launcher(QMainWindow):
     
@@ -1073,6 +1230,7 @@ class Launcher(QMainWindow):
         self._svg_icon_cache = {}
         self.home_server_status_widgets = {}
         self.server_status_worker = None
+        self.account_api_workers = []
         
         self.config_manager = ConfigManager()
         
@@ -1089,6 +1247,43 @@ class Launcher(QMainWindow):
         self.instances_path = os.path.join(self.base_path, "instances")
 
         os.makedirs(self.instances_path, exist_ok=True)
+
+        # ===============================
+        # CONFIGURACIÓN DE LA API
+        # ===============================
+        self.api_config_file = os.path.join(
+            self.base_path,
+            "api_config.json"
+        )
+        self.account_api_url = self.load_account_api_url()
+        self.account_api_online = False
+        self.account_health_worker_running = False
+        self.account_session_validation_running = False
+
+        self.remote_config_file = os.path.join(
+            self.base_path,
+            "remote_config_cache.json"
+        )
+        self.remote_config_worker = None
+        self.remote_config = self.load_cached_remote_config()
+        self.accounts_enabled = bool(
+            self.remote_config.get("accounts_enabled", True)
+        )
+        self.accounts_maintenance = bool(
+            self.remote_config.get("maintenance", False)
+        )
+        self.accounts_maintenance_message = str(
+            self.remote_config.get(
+                "maintenance_message",
+                ""
+            )
+        ).strip()
+
+        # ===============================
+        # CUENTA LOCAL DEL LAUNCHER
+        # ===============================
+        self.account_file = os.path.join(self.base_path, "account.json")
+        self.account_data = self.load_local_account()
         
         # ===== CARGAR MONTSERRAT VARIABLE =====
         font_path = resource_path("Montserrat-VariableFont_wght.ttf")
@@ -1308,10 +1503,110 @@ class Launcher(QMainWindow):
         sidebar_layout.addStretch()
 
         # ===============================
+        # CUENTA DEL USUARIO
+        # ===============================
+        self.account_card = QPushButton()
+        self.account_card.setFixedHeight(92)
+        self.account_card.setCursor(Qt.PointingHandCursor)
+        self.account_card.setStyleSheet("""
+            QPushButton {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #101722,
+                    stop:1 #0c121b
+                );
+                border:1px solid rgba(255,255,255,22);
+                border-radius:14px;
+                text-align:left;
+            }
+            QPushButton:hover {
+                background:#141c28;
+                border-color:rgba(125,115,255,110);
+            }
+        """)
+
+        account_layout = QHBoxLayout(self.account_card)
+        account_layout.setContentsMargins(12, 10, 10, 10)
+        account_layout.setSpacing(10)
+
+        account_avatar = QLabel()
+        account_avatar.setFixedSize(48, 48)
+        account_avatar.setAlignment(Qt.AlignCenter)
+        account_pm = self.get_remote_asset("logo.png")
+        if account_pm and not account_pm.isNull():
+            account_avatar.setPixmap(
+                account_pm.scaled(
+                    44, 44,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+            )
+
+        account_texts = QVBoxLayout()
+        account_texts.setSpacing(1)
+
+        connected_label = QLabel("CONECTADO COMO")
+        connected_label.setStyleSheet(
+            "color:#837bff;font-size:8px;font-weight:800;"
+            "letter-spacing:0.5px;border:none;background:transparent;"
+        )
+
+        self.account_name_label = QLabel()
+        self.account_name_label.setStyleSheet(
+            "color:#f3f5fb;font-size:12px;font-weight:750;"
+            "border:none;background:transparent;"
+        )
+
+        self.account_status_label = QLabel()
+        self.account_api_status_label = QLabel()
+        self.account_api_status_label.setStyleSheet(
+            "color:#747e91;font-size:8px;border:none;"
+            "background:transparent;"
+        )
+
+        account_texts.addWidget(connected_label)
+        account_texts.addWidget(self.account_name_label)
+        account_texts.addWidget(self.account_status_label)
+        account_texts.addWidget(self.account_api_status_label)
+
+        account_arrow = QLabel()
+        account_arrow.setFixedSize(18, 18)
+        account_arrow.setPixmap(
+            self.make_icon("chevron", 13, QColor("#98a3b7"))
+        )
+        account_arrow.setAlignment(Qt.AlignCenter)
+        account_arrow.setStyleSheet(
+            "background:transparent;border:none;"
+        )
+
+        account_layout.addWidget(account_avatar)
+        account_layout.addLayout(account_texts, 1)
+        account_layout.addWidget(account_arrow)
+
+        self.account_card.clicked.connect(self.open_account_dialog)
+        self.refresh_account_card()
+        sidebar_layout.addWidget(self.account_card)
+
+        # Descargar configuración central y luego comprobar la API.
+        QTimer.singleShot(100, self.fetch_remote_launcher_config)
+        QTimer.singleShot(350, self.check_account_api_health)
+        QTimer.singleShot(600, self.validate_saved_session)
+
+        self.account_health_timer = QTimer(self)
+        self.account_health_timer.timeout.connect(
+            self.check_account_api_health
+        )
+        self.account_health_timer.start(
+            ACCOUNT_HEALTH_INTERVAL_MS
+        )
+
+        sidebar_layout.addSpacing(6)
+
+        # ===============================
         # STATUS PANEL (ABAJO SIDEBAR)
         # ===============================
         status_card = QFrame()
-        status_card.setFixedHeight(96)
+        status_card.setFixedHeight(68)
         status_card.setStyleSheet("""
             QFrame {
                 background:qlineargradient(
@@ -1325,7 +1620,7 @@ class Launcher(QMainWindow):
         """)
 
         status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(14, 14, 14, 14)
+        status_layout.setContentsMargins(12, 10, 12, 10)
         status_layout.setSpacing(12)
 
         status_icon = QLabel()
@@ -1379,7 +1674,7 @@ class Launcher(QMainWindow):
 
         # Layout vertical principal del lado derecho
         content_wrapper = QVBoxLayout(main_content)
-        content_wrapper.setContentsMargins(24, 10, 20, 14)
+        content_wrapper.setContentsMargins(14, 10, 14, 14)
         content_wrapper.setSpacing(0)
 
         # ===============================
@@ -1398,34 +1693,6 @@ class Launcher(QMainWindow):
             QPushButton { background:transparent; color:#a8b0c1; border:none; border-radius:9px; font-size:18px; }
             QPushButton:hover { background:rgba(91,108,255,32); color:white; }
         """)
-
-        profile = QFrame()
-        profile.setObjectName("profileTop")
-        profile.setFixedSize(192, 42)
-        profile.setStyleSheet("""
-            #profileTop { background:#0d141f; border:1px solid rgba(255,255,255,25); border-radius:12px; }
-        """)
-        profile_layout = QHBoxLayout(profile)
-        profile_layout.setContentsMargins(10, 5, 12, 5)
-        profile_layout.setSpacing(9)
-        avatar = QLabel()
-        avatar.setFixedSize(30, 30)
-        avatar_pm = self.get_remote_asset("logo.png")
-        if avatar_pm and not avatar_pm.isNull():
-            avatar.setPixmap(avatar_pm.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        avatar.setAlignment(Qt.AlignCenter)
-        profile_text = QVBoxLayout()
-        profile_text.setSpacing(0)
-        profile_name = QLabel("D0cCtor")
-        profile_name.setStyleSheet("color:white; font-weight:700; font-size:13px; border:none;")
-        profile_status = QLabel("●  En línea")
-        profile_status.setStyleSheet("color:#49d17d; font-size:10px; border:none;")
-        profile_text.addWidget(profile_name)
-        profile_text.addWidget(profile_status)
-        profile_layout.addWidget(avatar)
-        profile_layout.addLayout(profile_text)
-        profile_layout.addStretch()
-        profile_layout.addWidget(QLabel("⌄"))
 
         def window_button(icon_kind, hover_bg):
             btn = QPushButton()
@@ -1456,8 +1723,7 @@ class Launcher(QMainWindow):
         close_btn.clicked.connect(self.close)
 
         topbar.addWidget(notify_btn)
-        topbar.addWidget(profile)
-        topbar.addSpacing(10)
+        topbar.addSpacing(4)
         topbar.addWidget(min_btn)
         topbar.addWidget(max_btn)
         topbar.addWidget(close_btn)
@@ -1530,6 +1796,2160 @@ class Launcher(QMainWindow):
         self.check_for_updates()
             
         
+    def default_remote_config(self):
+        return {
+            "account_api_url": DEFAULT_ACCOUNT_API_URL,
+            "accounts_enabled": True,
+            "maintenance": False,
+            "maintenance_message": "",
+            "minimum_launcher_version": "0.0",
+        }
+
+    def load_cached_remote_config(self):
+        config = self.default_remote_config()
+
+        try:
+            if os.path.exists(self.remote_config_file):
+                with open(
+                    self.remote_config_file,
+                    "r",
+                    encoding="utf-8"
+                ) as file:
+                    cached = json.load(file)
+
+                if isinstance(cached, dict):
+                    config.update(cached)
+        except Exception as exc:
+            print(
+                "No se pudo cargar remote_config_cache.json:",
+                exc
+            )
+
+        return config
+
+    def save_cached_remote_config(self, config):
+        try:
+            os.makedirs(self.base_path, exist_ok=True)
+
+            with open(
+                self.remote_config_file,
+                "w",
+                encoding="utf-8"
+            ) as file:
+                json.dump(
+                    config,
+                    file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+        except Exception as exc:
+            print(
+                "No se pudo guardar la configuración remota:",
+                exc
+            )
+
+    def version_tuple(self, value):
+        parts = re.findall(r"\d+", str(value))
+        return tuple(int(part) for part in parts) or (0,)
+
+    def current_launcher_version(self):
+        try:
+            return str(APP_VERSION)
+        except NameError:
+            return "0.0"
+
+    def apply_remote_launcher_config(self, payload):
+        config = self.default_remote_config()
+        config.update(payload)
+
+        remote_api_url = self.normalize_account_api_url(
+            config.get(
+                "account_api_url",
+                DEFAULT_ACCOUNT_API_URL
+            )
+        )
+
+        self.remote_config = config
+        self.accounts_enabled = bool(
+            config.get("accounts_enabled", True)
+        )
+        self.accounts_maintenance = bool(
+            config.get("maintenance", False)
+        )
+        self.accounts_maintenance_message = str(
+            config.get("maintenance_message", "")
+        ).strip()
+
+        # La URL remota tiene prioridad. También se guarda localmente
+        # para que siga funcionando si GitHub está caído.
+        if remote_api_url:
+            self.account_api_url = remote_api_url
+
+            try:
+                with open(
+                    self.api_config_file,
+                    "w",
+                    encoding="utf-8"
+                ) as file:
+                    json.dump(
+                        {
+                            "account_api_url": self.account_api_url,
+                            "managed_by_remote_config": True,
+                        },
+                        file,
+                        ensure_ascii=False,
+                        indent=2
+                    )
+            except Exception as exc:
+                print(
+                    "No se pudo actualizar api_config.json:",
+                    exc
+                )
+
+        self.save_cached_remote_config(config)
+        self.refresh_account_card()
+
+        minimum_version = str(
+            config.get("minimum_launcher_version", "0.0")
+        )
+
+        if (
+            self.version_tuple(self.current_launcher_version())
+            < self.version_tuple(minimum_version)
+        ):
+            self.show_account_message(
+                "Actualización requerida",
+                "Esta versión del launcher es demasiado antigua.\n\n"
+                f"Versión mínima requerida: {minimum_version}\n"
+                f"Versión instalada: "
+                f"{self.current_launcher_version()}"
+            )
+
+        self.check_account_api_health()
+
+    def fetch_remote_launcher_config(self):
+        if (
+            self.remote_config_worker is not None
+            and self.remote_config_worker.isRunning()
+        ):
+            return
+
+        worker = RemoteConfigWorker()
+        self.remote_config_worker = worker
+
+        worker.success.connect(
+            self.apply_remote_launcher_config
+        )
+
+        worker.failure.connect(
+            lambda message: print(
+                message,
+                "Usando configuración local almacenada."
+            )
+        )
+
+        def completed():
+            worker.deleteLater()
+
+            if self.remote_config_worker is worker:
+                self.remote_config_worker = None
+
+            # Incluso si falla GitHub, aplica el caché disponible.
+            if not self.remote_config:
+                self.remote_config = (
+                    self.load_cached_remote_config()
+                )
+
+            self.accounts_enabled = bool(
+                self.remote_config.get(
+                    "accounts_enabled",
+                    True
+                )
+            )
+            self.accounts_maintenance = bool(
+                self.remote_config.get(
+                    "maintenance",
+                    False
+                )
+            )
+            self.accounts_maintenance_message = str(
+                self.remote_config.get(
+                    "maintenance_message",
+                    ""
+                )
+            ).strip()
+
+            cached_url = self.remote_config.get(
+                "account_api_url"
+            )
+
+            if cached_url:
+                self.account_api_url = (
+                    self.normalize_account_api_url(
+                        cached_url
+                    )
+                )
+
+            self.refresh_account_card()
+
+        worker.completed.connect(completed)
+        worker.start()
+
+    def accounts_access_available(self):
+        if not self.accounts_enabled:
+            return (
+                False,
+                "El sistema de cuentas está desactivado "
+                "temporalmente."
+            )
+
+        if self.accounts_maintenance:
+            return (
+                False,
+                self.accounts_maintenance_message
+                or (
+                    "El sistema de cuentas está en "
+                    "mantenimiento."
+                )
+            )
+
+        return True, ""
+
+    def normalize_account_api_url(self, url):
+        url = str(url or "").strip().rstrip("/")
+
+        if not url:
+            return DEFAULT_ACCOUNT_API_URL
+
+        if not url.startswith(("http://", "https://")):
+            url = "http://" + url
+
+        return url
+
+    def load_account_api_url(self):
+        default = DEFAULT_ACCOUNT_API_URL
+
+        try:
+            if os.path.exists(self.api_config_file):
+                with open(
+                    self.api_config_file,
+                    "r",
+                    encoding="utf-8"
+                ) as file:
+                    payload = json.load(file)
+
+                return self.normalize_account_api_url(
+                    payload.get("account_api_url", default)
+                )
+        except Exception as exc:
+            print("Error cargando api_config.json:", exc)
+
+        return default
+
+    def save_account_api_url(self, url):
+        self.account_api_url = self.normalize_account_api_url(url)
+
+        try:
+            os.makedirs(self.base_path, exist_ok=True)
+
+            with open(
+                self.api_config_file,
+                "w",
+                encoding="utf-8"
+            ) as file:
+                json.dump(
+                    {
+                        "account_api_url": self.account_api_url
+                    },
+                    file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+        except Exception as exc:
+            print("Error guardando api_config.json:", exc)
+
+        self.account_api_online = False
+        self.refresh_account_card()
+        self.check_account_api_health()
+
+    def check_account_api_health(self):
+        if self.account_health_worker_running:
+            return
+
+        self.account_health_worker_running = True
+
+        def success(payload):
+            was_online = self.account_api_online
+
+            self.account_api_online = (
+                payload.get("status") == "ok"
+                if isinstance(payload, dict)
+                else True
+            )
+            self.refresh_account_card()
+
+            # Cuando la API vuelve a estar disponible, verifica
+            # inmediatamente que la sesión local siga siendo válida.
+            if (
+                self.account_api_online
+                and not was_online
+                and self.account_data.get("token")
+            ):
+                QTimer.singleShot(
+                    50,
+                    self.validate_saved_session
+                )
+
+        def failure(message):
+            self.account_api_online = False
+            self.refresh_account_card()
+            print("API de cuentas offline:", message)
+
+        def completed():
+            self.account_health_worker_running = False
+
+        self.run_account_api(
+            "GET",
+            "/health",
+            timeout=4,
+            on_success=success,
+            on_failure=failure,
+            on_completed=completed,
+        )
+
+    def open_api_configuration_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Configurar API")
+        dialog.setFixedSize(470, 235)
+        self.style_account_dialog(dialog)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+
+        api_header = QHBoxLayout()
+
+        title = QLabel("DIRECCIÓN DE LA API")
+        title.setStyleSheet(
+            "color:#f3f5fb;font-size:14px;font-weight:800;"
+        )
+
+        api_close_button = QPushButton("×")
+        api_close_button.setFixedSize(32, 32)
+        api_close_button.setCursor(Qt.PointingHandCursor)
+        api_close_button.clicked.connect(dialog.reject)
+        api_close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px;
+                font-size:19px;
+                padding:0;
+            }
+            QPushButton:hover {
+                color:#ff8090;
+                background:rgba(255,92,108,25);
+            }
+        """)
+
+        api_header.addWidget(title, 1)
+        api_header.addWidget(api_close_button)
+
+        description = QLabel(
+            "La dirección normalmente se administra desde "
+            "launcher_config.json en GitHub. Este valor local "
+            "queda disponible como respaldo para pruebas."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "color:#8d97aa;font-size:10px;"
+        )
+
+        url_input = self.auth_input(
+            "http://127.0.0.1:8000"
+        )
+        url_input.setText(self.account_api_url)
+
+        status = QLabel(
+            "● API conectada"
+            if self.account_api_online
+            else "● API sin conexión"
+        )
+        status.setStyleSheet(
+            (
+                "color:#55dc7a;font-size:10px;"
+                if self.account_api_online
+                else "color:#ff6674;font-size:10px;"
+            )
+        )
+
+        buttons = QHBoxLayout()
+
+        local_button = QPushButton("Usar API local")
+        local_button.clicked.connect(
+            lambda: url_input.setText(
+                DEFAULT_ACCOUNT_API_URL
+            )
+        )
+
+        save_button = self.auth_action_button("Guardar")
+        save_button.setFixedWidth(135)
+
+        def save():
+            self.save_account_api_url(url_input.text())
+            dialog.accept()
+
+        save_button.clicked.connect(save)
+
+        buttons.addWidget(local_button)
+        buttons.addStretch()
+        buttons.addWidget(save_button)
+
+        layout.addLayout(api_header)
+        layout.addWidget(description)
+        layout.addWidget(url_input)
+        layout.addWidget(status)
+        layout.addStretch()
+        layout.addLayout(buttons)
+
+        dialog.exec()
+
+    def run_account_api(
+        self,
+        method,
+        endpoint,
+        *,
+        json_payload=None,
+        headers=None,
+        timeout=12,
+        on_success=None,
+        on_failure=None,
+        on_unauthorized=None,
+        on_completed=None,
+    ):
+        worker = AccountApiWorker(
+            method,
+            endpoint,
+            base_url=self.account_api_url,
+            json_payload=json_payload,
+            headers=headers,
+            timeout=timeout,
+        )
+
+        self.account_api_workers.append(worker)
+
+        if on_success:
+            worker.success.connect(on_success)
+
+        if on_failure:
+            worker.failure.connect(on_failure)
+
+        if on_unauthorized:
+            worker.unauthorized.connect(on_unauthorized)
+
+        if on_completed:
+            worker.completed.connect(on_completed)
+
+        def cleanup():
+            if worker in self.account_api_workers:
+                self.account_api_workers.remove(worker)
+            worker.deleteLater()
+
+        worker.completed.connect(cleanup)
+        worker.start()
+
+    # =====================================================
+    # CUENTAS REALES CON API
+    # =====================================================
+    def load_local_account(self):
+        default = {
+            "logged_in": False,
+            "username": "Invitado",
+            "email": "",
+            "minecraft_linked": False,
+            "steam_linked": False,
+            "token": "",
+            "expires_at": 0,
+            "user_id": None,
+        }
+
+        try:
+            if os.path.exists(self.account_file):
+                with open(self.account_file, "r", encoding="utf-8") as file:
+                    saved = json.load(file)
+                default.update(saved)
+        except Exception as exc:
+            print("Error cargando account.json:", exc)
+
+        return default
+
+    def save_local_account(self):
+        try:
+            os.makedirs(os.path.dirname(self.account_file), exist_ok=True)
+            with open(self.account_file, "w", encoding="utf-8") as file:
+                json.dump(
+                    self.account_data,
+                    file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+        except Exception as exc:
+            print("Error guardando account.json:", exc)
+
+    def clear_local_account(self):
+        self.account_data = {
+            "logged_in": False,
+            "username": "Invitado",
+            "email": "",
+            "minecraft_linked": False,
+            "steam_linked": False,
+            "token": "",
+            "expires_at": 0,
+            "user_id": None,
+        }
+        self.save_local_account()
+        self.refresh_account_card()
+
+    def apply_auth_response(self, payload):
+        user = payload.get("user", {})
+
+        self.account_data.update({
+            "logged_in": True,
+            "username": user.get("username", "Usuario"),
+            "email": user.get("email", ""),
+            "minecraft_linked": bool(
+                user.get("minecraft_linked", False)
+            ),
+            "steam_linked": bool(
+                user.get("steam_linked", False)
+            ),
+            "token": payload.get("token", ""),
+            "expires_at": int(payload.get("expires_at", 0) or 0),
+            "user_id": user.get("id"),
+        })
+
+        self.save_local_account()
+        self.refresh_account_card()
+
+    def refresh_account_card(self):
+        if not hasattr(self, "account_name_label"):
+            return
+
+        logged_in = bool(self.account_data.get("logged_in"))
+
+        self.account_name_label.setText(
+            self.account_data.get("username", "Invitado")
+            if logged_in else "Iniciar sesión"
+        )
+
+        self.account_status_label.setText(
+            "●  En línea" if logged_in else "○  Sin conexión"
+        )
+        self.account_status_label.setStyleSheet(
+            (
+                "color:#55dc7a;font-size:9px;border:none;"
+                "background:transparent;"
+            )
+            if logged_in
+            else (
+                "color:#747e91;font-size:9px;border:none;"
+                "background:transparent;"
+            )
+        )
+
+        if hasattr(self, "account_api_status_label"):
+            if not self.accounts_enabled:
+                api_status_text = "CUENTAS ● Desactivadas"
+            elif self.accounts_maintenance:
+                api_status_text = "CUENTAS ● Mantenimiento"
+            elif self.account_api_online:
+                api_status_text = "API ● Online"
+            else:
+                api_status_text = "API ● Offline · modo local"
+
+            self.account_api_status_label.setText(
+                api_status_text
+            )
+            self.account_api_status_label.setStyleSheet(
+                (
+                    "color:#55dc7a;font-size:8px;border:none;"
+                    "background:transparent;"
+                )
+                if (
+                    self.account_api_online
+                    and self.accounts_enabled
+                    and not self.accounts_maintenance
+                )
+                else (
+                    "color:#f5bf57;font-size:8px;border:none;"
+                    "background:transparent;"
+                )
+            )
+
+    def api_error_text(self, response):
+        try:
+            payload = response.json()
+            detail = payload.get("detail")
+
+            if isinstance(detail, str):
+                return detail
+
+            if isinstance(detail, list) and detail:
+                first = detail[0]
+                return str(first.get("msg", "Datos inválidos."))
+
+        except Exception:
+            pass
+
+        return f"Error HTTP {response.status_code}"
+
+    def style_account_dialog(self, dialog):
+        """
+        Estilo para ventanas sin panel interior propio.
+        No usa transparencia para evitar fondos invisibles en Windows.
+        """
+        dialog.setWindowFlags(
+            Qt.Dialog | Qt.FramelessWindowHint
+        )
+        dialog.setAttribute(Qt.WA_TranslucentBackground, False)
+        dialog.setAutoFillBackground(True)
+        dialog.setStyleSheet("""
+            QDialog {
+                background:#0b111a;
+                color:#f3f5fb;
+                border:1px solid rgba(255,255,255,28);
+            }
+            QLabel {
+                color:#dce2ef;
+                background:transparent;
+                border:none;
+            }
+            QPushButton {
+                background:#121a26;
+                color:#dce2ef;
+                border:1px solid rgba(255,255,255,22);
+                border-radius:10px;
+                padding:8px 12px;
+                font-size:10px;
+                font-weight:700;
+            }
+            QPushButton:hover {
+                background:#182231;
+                border-color:rgba(125,115,255,95);
+            }
+            QPushButton:pressed {
+                background:#0e1520;
+            }
+            QLineEdit {
+                background:#0d141f;
+                color:#f3f5fb;
+                border:1px solid rgba(255,255,255,24);
+                border-radius:10px;
+                padding:0 12px;
+                font-size:11px;
+                selection-background-color:#655cff;
+            }
+            QLineEdit:focus {
+                border-color:rgba(125,115,255,150);
+                background:#101824;
+            }
+            QTabWidget::pane {
+                border:1px solid rgba(255,255,255,18);
+                border-radius:12px;
+                background:#0b111a;
+                top:-1px;
+            }
+            QTabBar::tab {
+                background:#0d141f;
+                color:#8993a7;
+                min-width:150px;
+                padding:10px;
+                border:none;
+            }
+            QTabBar::tab:selected {
+                color:#ffffff;
+                background:rgba(108,99,255,30);
+            }
+            QScrollArea,
+            QScrollArea > QWidget,
+            QScrollArea > QWidget > QWidget {
+                background:transparent;
+                border:none;
+            }
+        """)
+
+    def apply_dialog_panel_shadow(self, panel):
+        shadow = QGraphicsDropShadowEffect(panel)
+        shadow.setBlurRadius(38)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(0, 0, 0, 185))
+        panel.setGraphicsEffect(shadow)
+
+    def show_account_message(self, title, message):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setFixedSize(420, 170)
+        self.style_account_dialog(dialog)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+
+        label = QLabel(message)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignCenter)
+
+        button = QPushButton("Entendido")
+        button.clicked.connect(dialog.accept)
+
+        layout.addWidget(label)
+        layout.addWidget(button)
+        dialog.exec()
+
+    def validate_saved_session(self):
+        token = str(self.account_data.get("token", "") or "").strip()
+
+        if not token:
+            self.clear_local_account()
+            return
+
+        if not self.account_api_online:
+            # La sesión se conserva temporalmente mientras la API
+            # está apagada, pero se validará al reconectarse.
+            self.refresh_account_card()
+            return
+
+        if self.account_session_validation_running:
+            return
+
+        self.account_session_validation_running = True
+        invalid_session = {"value": False}
+
+        def success(user):
+            self.account_data.update({
+                "logged_in": True,
+                "username": user.get("username", "Usuario"),
+                "email": user.get("email", ""),
+                "minecraft_linked": bool(
+                    user.get("minecraft_linked", False)
+                ),
+                "steam_linked": bool(
+                    user.get("steam_linked", False)
+                ),
+                "user_id": user.get("id"),
+            })
+            self.save_local_account()
+            self.refresh_account_card()
+
+        def unauthorized():
+            invalid_session["value"] = True
+            self.clear_local_account()
+            print(
+                "La sesión local no existe en la API actual. "
+                "Se cerró automáticamente."
+            )
+
+        def failure(message):
+            if not invalid_session["value"]:
+                print("No se pudo validar la sesión:", message)
+                self.refresh_account_card()
+
+        def completed():
+            self.account_session_validation_running = False
+
+        self.run_account_api(
+            "GET",
+            "/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=6,
+            on_success=success,
+            on_failure=failure,
+            on_unauthorized=unauthorized,
+            on_completed=completed,
+        )
+
+    def open_account_dialog(self):
+        if self.account_data.get("logged_in"):
+            self.open_logged_account_dialog()
+        else:
+            self.open_auth_dialog()
+
+    def auth_input(self, placeholder, password=False):
+        field = QLineEdit()
+        field.setPlaceholderText(placeholder)
+        field.setFixedHeight(42)
+        field.setStyleSheet("""
+            QLineEdit {
+                background:#0d141f;
+                color:#f3f5fb;
+                border:1px solid rgba(255,255,255,24);
+                border-radius:10px;
+                padding:0 12px;
+                font-size:11px;
+            }
+            QLineEdit:focus {
+                border-color:rgba(125,115,255,150);
+                background:#101824;
+            }
+        """)
+
+        if password:
+            field.setEchoMode(QLineEdit.Password)
+
+        return field
+
+    def auth_action_button(self, text):
+        button = QPushButton(text)
+        button.setFixedHeight(42)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet("""
+            QPushButton {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #655cff,
+                    stop:1 #8068ff
+                );
+                color:white;
+                border:1px solid rgba(164,155,255,150);
+                border-radius:11px;
+                font-size:12px;
+                font-weight:800;
+            }
+            QPushButton:hover {
+                background:#746cff;
+            }
+            QPushButton:disabled {
+                background:#34364a;
+                color:#84899a;
+                border-color:rgba(255,255,255,15);
+            }
+        """)
+        return button
+
+    def open_auth_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cuenta D0cCtor's Hub")
+        dialog.setFixedSize(470, 510)
+        self.style_account_dialog(dialog)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(12)
+
+        auth_header = QHBoxLayout()
+
+        title = QLabel("D0cCtor's Hub")
+        title.setAlignment(Qt.AlignCenter)
+
+        auth_close_button = QPushButton("×")
+        auth_close_button.setFixedSize(32, 32)
+        auth_close_button.setCursor(Qt.PointingHandCursor)
+        auth_close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px;
+                font-size:19px;
+                padding:0;
+            }
+            QPushButton:hover {
+                color:#ff8090;
+                background:rgba(255,92,108,25);
+                border-color:rgba(255,92,108,70);
+            }
+        """)
+        auth_close_button.clicked.connect(dialog.reject)
+
+        auth_header.addStretch()
+        auth_header.addWidget(title)
+        auth_header.addStretch()
+        auth_header.addWidget(auth_close_button)
+        title.setStyleSheet("""
+            color:#f3f5fb;
+            font-size:20px;
+            font-weight:850;
+        """)
+
+        subtitle = QLabel(
+            "Iniciá sesión o creá una cuenta para continuar."
+        )
+
+        api_state = QLabel()
+        api_state.setAlignment(Qt.AlignCenter)
+        api_state.setWordWrap(True)
+
+        if not self.accounts_enabled:
+            api_state.setText(
+                "● El sistema de cuentas está desactivado "
+                "temporalmente."
+            )
+            api_state.setStyleSheet(
+                "color:#f5bf57;font-size:9px;"
+            )
+        elif self.accounts_maintenance:
+            api_state.setText(
+                "● "
+                + (
+                    self.accounts_maintenance_message
+                    or "El sistema de cuentas está en mantenimiento."
+                )
+            )
+            api_state.setStyleSheet(
+                "color:#f5bf57;font-size:9px;"
+            )
+        elif self.account_api_online:
+            api_state.setText(
+                f"● API conectada: {self.account_api_url}"
+            )
+            api_state.setStyleSheet(
+                "color:#55dc7a;font-size:9px;"
+            )
+        else:
+            api_state.setText(
+                "● API sin conexión. El launcher puede seguir "
+                "usándose, pero el registro y el login no estarán "
+                "disponibles."
+            )
+            api_state.setStyleSheet(
+                "color:#f5bf57;font-size:9px;"
+            )
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("color:#8d97aa;font-size:10px;")
+
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        tabs.tabBar().setExpanding(False)
+        tabs.tabBar().setUsesScrollButtons(False)
+        tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border:1px solid rgba(255,255,255,18);
+                border-radius:14px;
+                background:#0b111a;
+                top:-1px;
+                margin-top:8px;
+            }
+
+            QTabBar {
+                qproperty-drawBase: 0;
+                background:transparent;
+            }
+
+            QTabBar::tab {
+                background:#101720;
+                color:#7f899c;
+                min-width:165px;
+                min-height:38px;
+                padding:0 16px;
+                margin:0 5px;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:12px;
+                font-size:10px;
+                font-weight:800;
+            }
+
+            QTabBar::tab:hover {
+                color:#d8dcef;
+                background:#151e2a;
+                border-color:rgba(125,115,255,65);
+            }
+
+            QTabBar::tab:selected {
+                color:#ffffff;
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(101,92,255,58),
+                    stop:1 rgba(128,104,255,42)
+                );
+                border:1px solid rgba(151,142,255,130);
+            }
+
+            QTabBar::tab:selected:hover {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 rgba(101,92,255,72),
+                    stop:1 rgba(128,104,255,54)
+                );
+            }
+        """)
+
+        # LOGIN
+        login_page = QWidget()
+        login_layout = QVBoxLayout(login_page)
+        login_layout.setContentsMargins(18, 20, 18, 18)
+        login_layout.setSpacing(12)
+
+        login_email = self.auth_input("Correo electrónico")
+        login_password = self.auth_input("Contraseña", password=True)
+        login_error = QLabel()
+        login_error.setWordWrap(True)
+        login_error.setStyleSheet(
+            "color:#ff6674;font-size:10px;"
+        )
+        login_button = self.auth_action_button("Iniciar sesión")
+
+        def perform_login():
+            access_allowed, access_message = (
+                self.accounts_access_available()
+            )
+
+            if not access_allowed:
+                login_error.setText(access_message)
+                return
+
+            if not self.account_api_online:
+                login_error.setText(
+                    "La API está offline. Iniciá el servidor o "
+                    "revisá la dirección configurada."
+                )
+                self.check_account_api_health()
+                return
+
+            email = login_email.text().strip()
+            password = login_password.text()
+
+            if not email or not password:
+                login_error.setText(
+                    "Completá el correo y la contraseña."
+                )
+                return
+
+            login_button.setEnabled(False)
+            login_button.setText("Ingresando...")
+            login_error.clear()
+
+            def login_success(payload):
+                self.apply_auth_response(payload)
+                dialog.accept()
+
+            def login_failure(message):
+                login_error.setText(message)
+
+            def login_completed():
+                login_button.setEnabled(True)
+                login_button.setText("Iniciar sesión")
+
+            self.run_account_api(
+                "POST",
+                "/auth/login",
+                json_payload={
+                    "email": email,
+                    "password": password,
+                },
+                timeout=10,
+                on_success=login_success,
+                on_failure=login_failure,
+                on_completed=login_completed,
+            )
+
+        login_button.clicked.connect(perform_login)
+        login_password.returnPressed.connect(perform_login)
+
+        login_layout.addWidget(login_email)
+        login_layout.addWidget(login_password)
+        login_layout.addWidget(login_error)
+        login_layout.addStretch()
+        login_layout.addWidget(login_button)
+
+        # REGISTER
+        register_page = QWidget()
+        register_layout = QVBoxLayout(register_page)
+        register_layout.setContentsMargins(18, 20, 18, 18)
+        register_layout.setSpacing(12)
+
+        register_username = self.auth_input("Nombre de usuario")
+        register_email = self.auth_input("Correo electrónico")
+        register_password = self.auth_input(
+            "Contraseña: mínimo 8 caracteres",
+            password=True
+        )
+        register_confirm = self.auth_input(
+            "Repetir contraseña",
+            password=True
+        )
+        register_error = QLabel()
+        register_error.setWordWrap(True)
+        register_error.setStyleSheet(
+            "color:#ff6674;font-size:10px;"
+        )
+        register_button = self.auth_action_button("Crear cuenta")
+
+        def perform_register():
+            access_allowed, access_message = (
+                self.accounts_access_available()
+            )
+
+            if not access_allowed:
+                register_error.setText(access_message)
+                return
+
+            if not self.account_api_online:
+                register_error.setText(
+                    "La API está offline. Iniciá el servidor o "
+                    "revisá la dirección configurada."
+                )
+                self.check_account_api_health()
+                return
+
+            username = register_username.text().strip()
+            email = register_email.text().strip()
+            password = register_password.text()
+            confirm = register_confirm.text()
+
+            if not username or not email or not password:
+                register_error.setText(
+                    "Completá todos los campos."
+                )
+                return
+
+            if password != confirm:
+                register_error.setText(
+                    "Las contraseñas no coinciden."
+                )
+                return
+
+            register_button.setEnabled(False)
+            register_button.setText("Creando cuenta...")
+            register_error.clear()
+
+            def register_success(payload):
+                self.apply_auth_response(payload)
+                dialog.accept()
+
+            def register_failure(message):
+                register_error.setText(message)
+
+            def register_completed():
+                register_button.setEnabled(True)
+                register_button.setText("Crear cuenta")
+
+            self.run_account_api(
+                "POST",
+                "/auth/register",
+                json_payload={
+                    "username": username,
+                    "email": email,
+                    "password": password,
+                },
+                timeout=10,
+                on_success=register_success,
+                on_failure=register_failure,
+                on_completed=register_completed,
+            )
+
+        register_button.clicked.connect(perform_register)
+        register_confirm.returnPressed.connect(perform_register)
+
+        register_layout.addWidget(register_username)
+        register_layout.addWidget(register_email)
+        register_layout.addWidget(register_password)
+        register_layout.addWidget(register_confirm)
+        register_layout.addWidget(register_error)
+        register_layout.addStretch()
+        register_layout.addWidget(register_button)
+
+        tabs.addTab(login_page, "INICIAR SESIÓN")
+        tabs.addTab(register_page, "REGISTRARSE")
+
+        tabs.tabBar().setStyleSheet(
+            tabs.tabBar().styleSheet()
+        )
+
+        configure_api_button = QPushButton(
+            "Configurar dirección de la API"
+        )
+        configure_api_button.setCursor(Qt.PointingHandCursor)
+        configure_api_button.clicked.connect(
+            lambda: (
+                dialog.accept(),
+                self.open_api_configuration_dialog()
+            )
+        )
+
+        forgot_password_button = QPushButton("¿Olvidaste tu contraseña?")
+        forgot_password_button.setStyleSheet(
+            "color:#9f99ff;background:transparent;border:none;font-size:9px;"
+        )
+        forgot_password_button.clicked.connect(
+            lambda: (
+                dialog.accept(),
+                self.open_password_recovery_dialog()
+            )
+        )
+
+        root.addLayout(auth_header)
+        root.addWidget(subtitle)
+        root.addWidget(api_state)
+
+        tabs_wrapper = QHBoxLayout()
+        tabs_wrapper.setContentsMargins(0, 0, 0, 0)
+        tabs_wrapper.addStretch()
+        tabs_wrapper.addWidget(tabs, 1)
+        tabs_wrapper.addStretch()
+
+        root.addLayout(tabs_wrapper, 1)
+        root.addWidget(forgot_password_button)
+        root.addWidget(configure_api_button)
+
+        dialog.exec()
+        self.refresh_account_card()
+
+    def format_session_time(self, timestamp):
+        try:
+            return time.strftime("%d/%m/%Y %H:%M", time.localtime(int(timestamp)))
+        except Exception:
+            return "Fecha desconocida"
+
+    def open_sessions_dialog(self, parent_dialog=None):
+        if not self.account_api_online:
+            self.show_account_message(
+                "API sin conexión",
+                "Necesitás tener la API conectada para administrar sesiones."
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Sesiones activas")
+        dialog.setFixedSize(520, 500)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setAttribute(Qt.WA_TranslucentBackground, True)
+        dialog.setStyleSheet("QDialog { background:transparent; }")
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        panel = QFrame()
+        panel.setObjectName("sessionsPanel")
+        panel.setStyleSheet("""
+            QFrame#sessionsPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925, stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QLabel { border:none; background:transparent; }
+        """)
+
+        self.apply_dialog_panel_shadow(panel)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("SESIONES ACTIVAS")
+        title.setStyleSheet("color:#f4f6fb;font-size:16px;font-weight:850;")
+        close_button = QPushButton("×")
+        close_button.setFixedSize(32, 32)
+        close_button.clicked.connect(dialog.accept)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8); color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px; font-size:19px;
+            }
+        """)
+        header.addWidget(title, 1)
+        header.addWidget(close_button)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background:transparent;")
+        container = QWidget()
+        sessions_layout = QVBoxLayout(container)
+        sessions_layout.setSpacing(9)
+        scroll.setWidget(container)
+
+        close_others = self.auth_action_button(
+            "Cerrar todas las demás sesiones"
+        )
+        close_others.setCursor(Qt.PointingHandCursor)
+        close_others.setStyleSheet("""
+            QPushButton {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #655cff,
+                    stop:1 #8068ff
+                );
+                color:white;
+                border:1px solid rgba(164,155,255,150);
+                border-radius:11px;
+                font-size:11px;
+                font-weight:850;
+            }
+            QPushButton:hover {
+                background:#7a72ff;
+                border-color:rgba(205,200,255,210);
+            }
+            QPushButton:pressed {
+                background:#554dd4;
+            }
+            QPushButton:disabled {
+                background:#272d3b;
+                color:#697184;
+                border-color:rgba(255,255,255,12);
+            }
+        """)
+        close_others.setEnabled(False)
+
+        def reload_sessions():
+            while sessions_layout.count():
+                item = sessions_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+            loading = QLabel("Cargando sesiones...")
+            loading.setAlignment(Qt.AlignCenter)
+            loading.setStyleSheet("color:#8993a7;font-size:10px;")
+            sessions_layout.addWidget(loading)
+
+            token = str(self.account_data.get("token", "") or "").strip()
+
+            def success(payload):
+                while sessions_layout.count():
+                    item = sessions_layout.takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+
+                sessions = payload.get("sessions", [])
+                close_others.setEnabled(any(not s.get("current") for s in sessions))
+
+                for session_item in sessions:
+                    card = QFrame()
+                    card.setObjectName("sessionCard")
+                    card.setStyleSheet("""
+                        QFrame#sessionCard {
+                            background:#111923;
+                            border:1px solid rgba(255,255,255,18);
+                            border-radius:12px;
+                        }
+                        QFrame#sessionCard QLabel {
+                            background:transparent;
+                            border:none;
+                        }
+                    """)
+                    row = QHBoxLayout(card)
+                    row.setContentsMargins(13, 11, 13, 11)
+
+                    texts = QVBoxLayout()
+                    name = QLabel(
+                        session_item.get("device_name", "Dispositivo desconocido")
+                        + ("  ·  ESTA PC" if session_item.get("current") else "")
+                    )
+                    name.setStyleSheet("color:#f0f3f9;font-size:10px;font-weight:800;")
+                    activity = QLabel(
+                        "Última actividad: "
+                        + self.format_session_time(session_item.get("last_seen_at", 0))
+                    )
+                    activity.setStyleSheet("color:#7f899c;font-size:8px;")
+                    texts.addWidget(name)
+                    texts.addWidget(activity)
+                    row.addLayout(texts, 1)
+
+                    if not session_item.get("current"):
+                        button = QPushButton("Cerrar")
+                        button.setStyleSheet("""
+                            QPushButton {
+                                color:#ff8090;
+                                background:rgba(255,75,94,14);
+                                border:1px solid rgba(255,102,116,50);
+                                border-radius:8px;
+                                padding:6px 9px;
+                                font-size:8px;
+                                font-weight:800;
+                            }
+                            QPushButton:hover {
+                                color:#ffffff;
+                                background:rgba(255,75,94,38);
+                                border-color:rgba(255,102,116,115);
+                            }
+                            QPushButton:pressed {
+                                background:rgba(210,45,65,50);
+                            }
+                        """)
+                        sid = session_item.get("id")
+                        button.clicked.connect(
+                            lambda checked=False, session_id=sid:
+                            self.run_account_api(
+                                "DELETE",
+                                f"/auth/sessions/{session_id}",
+                                headers={"Authorization": f"Bearer {token}"},
+                                timeout=8,
+                                on_success=lambda payload: reload_sessions(),
+                                on_failure=lambda message: self.show_account_message(
+                                    "No se pudo cerrar", message
+                                ),
+                            )
+                        )
+                        row.addWidget(button)
+
+                    sessions_layout.addWidget(card)
+
+                sessions_layout.addStretch()
+
+            self.run_account_api(
+                "GET",
+                "/auth/sessions",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=8,
+                on_success=success,
+                on_failure=lambda message: self.show_account_message(
+                    "Error de sesiones", message
+                ),
+            )
+
+        def close_other_sessions():
+            token = str(self.account_data.get("token", "") or "").strip()
+            self.run_account_api(
+                "POST",
+                "/auth/sessions/logout-others",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=8,
+                on_success=lambda payload: reload_sessions(),
+                on_failure=lambda message: self.show_account_message(
+                    "No se pudo completar", message
+                ),
+            )
+
+        close_others.clicked.connect(close_other_sessions)
+
+        info_label = QLabel(
+            "Podés cerrar sesiones abiertas en otras PCs."
+        )
+        info_label.setStyleSheet(
+            "color:#8993a7;font-size:9px;"
+        )
+
+        layout.addLayout(header)
+        layout.addWidget(info_label)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(close_others)
+        outer.addWidget(panel)
+
+        reload_sessions()
+        dialog.exec()
+
+    def open_password_recovery_dialog(self):
+        access_allowed, access_message = (
+            self.accounts_access_available()
+        )
+
+        if not access_allowed:
+            self.show_account_message(
+                "Cuentas no disponibles",
+                access_message
+            )
+            return
+
+        if not self.account_api_online:
+            self.show_account_message(
+                "API sin conexión",
+                "Necesitás tener la API conectada para recuperar la contraseña."
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Recuperar contraseña")
+        dialog.setFixedSize(440, 480)
+        dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        dialog.setAttribute(Qt.WA_TranslucentBackground, True)
+        dialog.setStyleSheet("QDialog { background:transparent; }")
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+        panel = QFrame()
+        panel.setObjectName("recoveryPanel")
+        panel.setStyleSheet("""
+            QFrame#recoveryPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925, stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QLabel { border:none; background:transparent; }
+        """)
+
+        self.apply_dialog_panel_shadow(panel)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        title = QLabel("RECUPERAR CONTRASEÑA")
+        title.setStyleSheet("color:#f4f6fb;font-size:15px;font-weight:850;")
+        email_input = self.auth_input("Correo electrónico")
+        code_input = self.auth_input("Código de 6 dígitos")
+        new_password = self.auth_input("Nueva contraseña", password=True)
+        confirm_password = self.auth_input("Repetir nueva contraseña", password=True)
+        message = QLabel()
+        message.setWordWrap(True)
+        message.setStyleSheet("color:#f5bf57;font-size:9px;")
+
+        request_button = QPushButton("Solicitar código")
+        request_button.setFixedHeight(40)
+        request_button.setCursor(Qt.PointingHandCursor)
+        request_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(108,99,255,18);
+                color:#b4afff;
+                border:1px solid rgba(126,116,255,55);
+                border-radius:10px;
+                font-size:10px;
+                font-weight:800;
+            }
+            QPushButton:hover {
+                background:rgba(108,99,255,36);
+                color:#ffffff;
+                border-color:rgba(146,137,255,120);
+            }
+            QPushButton:pressed {
+                background:rgba(83,74,220,50);
+            }
+            QPushButton:disabled {
+                color:#687084;
+                background:#151a24;
+                border-color:rgba(255,255,255,12);
+            }
+        """)
+
+        confirm_button = self.auth_action_button(
+            "Restablecer contraseña"
+        )
+
+        close_button = QPushButton("Cancelar")
+        close_button.setFixedHeight(38)
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,6);
+                color:#8f99ab;
+                border:1px solid rgba(255,255,255,18);
+                border-radius:10px;
+                font-size:10px;
+                font-weight:750;
+            }
+            QPushButton:hover {
+                background:rgba(255,255,255,12);
+                color:#f1f3f8;
+                border-color:rgba(255,255,255,38);
+            }
+            QPushButton:pressed {
+                background:rgba(255,255,255,4);
+            }
+        """)
+        close_button.clicked.connect(dialog.reject)
+
+        def request_code():
+            email = email_input.text().strip()
+            if not email:
+                message.setText("Ingresá tu correo.")
+                return
+
+            self.run_account_api(
+                "POST",
+                "/auth/recovery/request",
+                json_payload={"email": email},
+                timeout=8,
+                on_success=lambda payload: (
+                    code_input.setText(str(payload.get("development_code", ""))),
+                    message.setText(
+                        "Modo desarrollo: el código se completó automáticamente. "
+                        "Vence en 10 minutos."
+                    )
+                ),
+                on_failure=lambda error: message.setText(error),
+            )
+
+        def confirm():
+            email = email_input.text().strip()
+            code = code_input.text().strip()
+            password = new_password.text()
+
+            if password != confirm_password.text():
+                message.setText("Las contraseñas no coinciden.")
+                return
+
+            self.run_account_api(
+                "POST",
+                "/auth/recovery/confirm",
+                json_payload={
+                    "email": email,
+                    "code": code,
+                    "new_password": password,
+                },
+                timeout=8,
+                on_success=lambda payload: (
+                    self.clear_local_account(),
+                    dialog.accept(),
+                    self.show_account_message(
+                        "Contraseña restablecida",
+                        "Ya podés iniciar sesión con la contraseña nueva."
+                    )
+                ),
+                on_failure=lambda error: message.setText(error),
+            )
+
+        request_button.clicked.connect(request_code)
+        confirm_button.clicked.connect(confirm)
+
+        layout.addWidget(title)
+        recovery_info = QLabel(
+            "Por ahora el código se muestra dentro del launcher porque "
+            "todavía no configuramos el envío de correos."
+        )
+        recovery_info.setWordWrap(True)
+        recovery_info.setStyleSheet(
+            "color:#8993a7;font-size:9px;"
+        )
+        layout.addWidget(recovery_info)
+        layout.addWidget(email_input)
+        layout.addWidget(request_button)
+        layout.addWidget(code_input)
+        layout.addWidget(new_password)
+        layout.addWidget(confirm_password)
+        layout.addWidget(message)
+        layout.addStretch()
+        layout.addWidget(confirm_button)
+        layout.addWidget(close_button)
+        outer.addWidget(panel)
+        dialog.exec()
+
+    def open_logged_account_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Mi cuenta")
+        dialog.setFixedSize(480, 610)
+        dialog.setWindowFlags(
+            Qt.Dialog | Qt.FramelessWindowHint
+        )
+        dialog.setAttribute(Qt.WA_TranslucentBackground, True)
+        dialog.setStyleSheet("QDialog { background:transparent; }")
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        panel = QFrame()
+        panel.setObjectName("accountDialogPanel")
+        panel.setStyleSheet("""
+            QFrame#accountDialogPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925,
+                    stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QLabel {
+                border:none;
+                background:transparent;
+            }
+            QPushButton {
+                border:none;
+            }
+        """)
+
+        shadow = QGraphicsDropShadowEffect(panel)
+        shadow.setBlurRadius(36)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(0, 0, 0, 180))
+        panel.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 20, 24, 22)
+        layout.setSpacing(11)
+
+        header = QHBoxLayout()
+
+        header_texts = QVBoxLayout()
+        header_texts.setSpacing(2)
+
+        title = QLabel("MI CUENTA")
+        title.setStyleSheet(
+            "color:#8f98aa;font-size:9px;font-weight:800;"
+            "letter-spacing:1px;"
+        )
+
+        username = QLabel(
+            self.account_data.get("username", "Usuario")
+        )
+        username.setStyleSheet(
+            "color:#f4f6fb;font-size:21px;font-weight:850;"
+        )
+
+        email = QLabel(self.account_data.get("email", ""))
+        email.setStyleSheet("color:#8d97aa;font-size:10px;")
+
+        header_texts.addWidget(title)
+        header_texts.addWidget(username)
+        header_texts.addWidget(email)
+
+        close_button = QPushButton("×")
+        close_button.setFixedSize(34, 34)
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:10px;
+                font-size:20px;
+                font-weight:400;
+            }
+            QPushButton:hover {
+                background:rgba(255,92,108,30);
+                color:#ff8090;
+                border-color:rgba(255,92,108,70);
+            }
+        """)
+        close_button.clicked.connect(dialog.accept)
+
+        header.addLayout(header_texts, 1)
+        header.addWidget(close_button, 0, Qt.AlignTop)
+
+        api_card = QFrame()
+        api_card.setStyleSheet("""
+            QFrame {
+                background:rgba(255,255,255,6);
+                border:1px solid rgba(255,255,255,16);
+                border-radius:13px;
+            }
+        """)
+        api_layout = QHBoxLayout(api_card)
+        api_layout.setContentsMargins(13, 10, 13, 10)
+
+        api_label = QLabel(
+            (
+                "●  API conectada"
+                if self.account_api_online
+                else "●  API offline · sesión local"
+            )
+            + f"\n{self.account_api_url}"
+        )
+        api_label.setWordWrap(True)
+        api_label.setStyleSheet(
+            (
+                "color:#55dc7a;font-size:9px;"
+                if self.account_api_online
+                else "color:#f5bf57;font-size:9px;"
+            )
+        )
+
+        configure_button = QPushButton("CONFIGURAR")
+        configure_button.setCursor(Qt.PointingHandCursor)
+        configure_button.setStyleSheet("""
+            QPushButton {
+                color:#a8a2ff;
+                background:rgba(108,99,255,18);
+                border:1px solid rgba(126,116,255,45);
+                border-radius:9px;
+                padding:7px 10px;
+                font-size:8px;
+                font-weight:850;
+            }
+            QPushButton:hover {
+                background:rgba(108,99,255,32);
+                border-color:rgba(143,133,255,90);
+            }
+        """)
+        configure_button.clicked.connect(
+            lambda: (
+                dialog.accept(),
+                self.open_api_configuration_dialog()
+            )
+        )
+
+        api_layout.addWidget(api_label, 1)
+        api_layout.addWidget(configure_button)
+
+        section_accounts = QLabel("CUENTAS VINCULADAS")
+        section_accounts.setStyleSheet(
+            "color:#747e91;font-size:8px;font-weight:850;"
+            "letter-spacing:1px;"
+        )
+
+        def connection_button(title_text, description, linked, callback):
+            button = QPushButton()
+            button.setFixedHeight(54)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setText(
+                f"{title_text}\n{description}    "
+                + ("VINCULADO" if linked else "VINCULAR")
+            )
+            button.setStyleSheet("""
+                QPushButton {
+                    background:#111923;
+                    color:#dce2ef;
+                    border:1px solid rgba(255,255,255,18);
+                    border-radius:12px;
+                    text-align:left;
+                    padding:7px 14px;
+                    font-size:10px;
+                    font-weight:700;
+                }
+                QPushButton:hover {
+                    border-color:rgba(125,115,255,100);
+                    background:#151e2a;
+                }
+            """)
+            button.clicked.connect(callback)
+            return button
+
+        minecraft_button = connection_button(
+            "Minecraft",
+            "Microsoft / Java Edition",
+            self.account_data.get("minecraft_linked", False),
+            self.prepare_minecraft_link
+        )
+        steam_button = connection_button(
+            "Steam",
+            "Juegos y servidores de Steam",
+            self.account_data.get("steam_linked", False),
+            self.prepare_steam_link
+        )
+
+        section_security = QLabel("SEGURIDAD")
+        section_security.setStyleSheet(
+            "color:#747e91;font-size:8px;font-weight:850;"
+            "letter-spacing:1px;"
+        )
+
+        change_password_button = QPushButton(
+            "Cambiar contraseña\n"
+            "Cierra las demás sesiones abiertas"
+        )
+        change_password_button.setFixedHeight(54)
+        change_password_button.setCursor(Qt.PointingHandCursor)
+        change_password_button.setStyleSheet("""
+            QPushButton {
+                background:#111923;
+                color:#dce2ef;
+                border:1px solid rgba(255,255,255,18);
+                border-radius:12px;
+                text-align:left;
+                padding:7px 14px;
+                font-size:10px;
+                font-weight:700;
+            }
+            QPushButton:hover {
+                border-color:rgba(125,115,255,100);
+                background:#151e2a;
+            }
+        """)
+        change_password_button.clicked.connect(
+            lambda: self.open_change_password_dialog(dialog)
+        )
+
+        sessions_button = QPushButton(
+            "Sesiones activas\nVer y cerrar sesiones abiertas en otras PCs"
+        )
+        sessions_button.setFixedHeight(54)
+        sessions_button.setCursor(Qt.PointingHandCursor)
+        sessions_button.setStyleSheet("""
+            QPushButton {
+                background:#111923;
+                color:#dce2ef;
+                border:1px solid rgba(255,255,255,18);
+                border-radius:12px;
+                text-align:left;
+                padding:7px 14px;
+                font-size:10px;
+                font-weight:700;
+            }
+            QPushButton:hover {
+                background:#151e2a;
+                border-color:rgba(125,115,255,100);
+                color:#ffffff;
+            }
+            QPushButton:pressed {
+                background:#0d141f;
+            }
+        """)
+        sessions_button.clicked.connect(
+            lambda: self.open_sessions_dialog(dialog)
+        )
+
+        logout_button = QPushButton("Cerrar sesión")
+        logout_button.setFixedHeight(42)
+        logout_button.setCursor(Qt.PointingHandCursor)
+        logout_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,75,94,15);
+                color:#ff8090;
+                border:1px solid rgba(255,102,116,55);
+                border-radius:11px;
+                font-size:11px;
+                font-weight:850;
+            }
+            QPushButton:hover {
+                background:rgba(255,75,94,27);
+                border-color:rgba(255,102,116,105);
+            }
+        """)
+        def perform_logout():
+            logout_button.setEnabled(False)
+            logout_button.setText("Cerrando sesión...")
+            self.logout_api_account(dialog)
+
+        logout_button.clicked.connect(perform_logout)
+
+        layout.addLayout(header)
+        layout.addSpacing(3)
+        layout.addWidget(api_card)
+        layout.addSpacing(4)
+        layout.addWidget(section_accounts)
+        layout.addWidget(minecraft_button)
+        layout.addWidget(steam_button)
+        layout.addSpacing(4)
+        layout.addWidget(section_security)
+        layout.addWidget(change_password_button)
+        layout.addWidget(sessions_button)
+        layout.addStretch()
+        layout.addWidget(logout_button)
+
+        outer.addWidget(panel)
+        dialog.exec()
+
+    def open_change_password_dialog(self, parent_dialog=None):
+        if not self.account_api_online:
+            self.show_account_message(
+                "API sin conexión",
+                "Necesitás tener la API conectada para cambiar "
+                "la contraseña."
+            )
+            self.check_account_api_health()
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Cambiar contraseña")
+        dialog.setFixedSize(430, 390)
+        dialog.setWindowFlags(
+            Qt.Dialog | Qt.FramelessWindowHint
+        )
+        dialog.setAttribute(Qt.WA_TranslucentBackground, True)
+        dialog.setStyleSheet("QDialog { background:transparent; }")
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        panel = QFrame()
+        panel.setObjectName("passwordPanel")
+        panel.setStyleSheet("""
+            QFrame#passwordPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925,
+                    stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QLabel {
+                border:none;
+                background:transparent;
+            }
+        """)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("CAMBIAR CONTRASEÑA")
+        title.setStyleSheet(
+            "color:#f4f6fb;font-size:16px;font-weight:850;"
+        )
+
+        close_button = QPushButton("×")
+        close_button.setFixedSize(32, 32)
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px;
+                font-size:19px;
+            }
+            QPushButton:hover {
+                color:#ff8090;
+                border-color:rgba(255,92,108,70);
+            }
+        """)
+        close_button.clicked.connect(dialog.reject)
+
+        header.addWidget(title, 1)
+        header.addWidget(close_button)
+
+        description = QLabel(
+            "La nueva contraseña debe tener al menos 8 caracteres. "
+            "Al cambiarla se cerrarán las demás sesiones, pero esta "
+            "PC seguirá conectada."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "color:#8993a7;font-size:9px;"
+        )
+
+        current_input = self.auth_input(
+            "Contraseña actual",
+            password=True
+        )
+        new_input = self.auth_input(
+            "Nueva contraseña",
+            password=True
+        )
+        confirm_input = self.auth_input(
+            "Repetir nueva contraseña",
+            password=True
+        )
+
+        error_label = QLabel()
+        error_label.setWordWrap(True)
+        error_label.setStyleSheet(
+            "color:#ff6674;font-size:9px;"
+        )
+
+        save_button = self.auth_action_button(
+            "Actualizar contraseña"
+        )
+
+        def perform_change():
+            current_password = current_input.text()
+            new_password = new_input.text()
+            confirmation = confirm_input.text()
+
+            if not current_password or not new_password:
+                error_label.setText(
+                    "Completá todos los campos."
+                )
+                return
+
+            if len(new_password) < 8:
+                error_label.setText(
+                    "La contraseña nueva debe tener al menos "
+                    "8 caracteres."
+                )
+                return
+
+            if new_password != confirmation:
+                error_label.setText(
+                    "Las contraseñas nuevas no coinciden."
+                )
+                return
+
+            save_button.setEnabled(False)
+            save_button.setText("Actualizando...")
+            error_label.clear()
+
+            token = str(
+                self.account_data.get("token", "") or ""
+            ).strip()
+
+            def success(payload):
+                dialog.accept()
+                self.show_account_message(
+                    "Contraseña actualizada",
+                    "La contraseña se cambió correctamente y las "
+                    "demás sesiones fueron cerradas."
+                )
+
+            def failure(message):
+                error_label.setText(message)
+
+            def completed():
+                save_button.setEnabled(True)
+                save_button.setText(
+                    "Actualizar contraseña"
+                )
+
+            self.run_account_api(
+                "POST",
+                "/auth/change-password",
+                json_payload={
+                    "current_password": current_password,
+                    "new_password": new_password,
+                },
+                headers={
+                    "Authorization": f"Bearer {token}"
+                },
+                timeout=10,
+                on_success=success,
+                on_failure=failure,
+                on_completed=completed,
+            )
+
+        save_button.clicked.connect(perform_change)
+        confirm_input.returnPressed.connect(perform_change)
+
+        layout.addLayout(header)
+        layout.addWidget(description)
+        layout.addSpacing(5)
+        layout.addWidget(current_input)
+        layout.addWidget(new_input)
+        layout.addWidget(confirm_input)
+        layout.addWidget(error_label)
+        layout.addStretch()
+        layout.addWidget(save_button)
+
+        outer.addWidget(panel)
+        dialog.exec()
+
+    def logout_api_account(self, dialog=None):
+        token = str(self.account_data.get("token", "") or "").strip()
+
+        # Primero cerramos únicamente el diálogo de cuenta.
+        # Usamos hide() + deleteLater() en vez de accept() para evitar
+        # que una señal encadenada alcance accidentalmente la ventana principal.
+        if dialog is not None:
+            try:
+                dialog.hide()
+                dialog.deleteLater()
+            except RuntimeError:
+                pass
+
+        # Limpiamos la sesión local en el siguiente ciclo del event loop.
+        # Esto evita modificar widgets mientras el diálogo todavía procesa
+        # el clic que activó "Cerrar sesión".
+        QTimer.singleShot(
+            0,
+            self.clear_local_account
+        )
+
+        # La revocación remota se hace aparte y nunca bloquea la interfaz.
+        if token:
+            self.run_account_api(
+                "POST",
+                "/auth/logout",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+                on_failure=lambda message: print(
+                    "No se pudo cerrar la sesión remota:",
+                    message
+                ),
+            )
+
+    def prepare_minecraft_link(self):
+        self.show_account_message(
+            "Vincular Minecraft",
+            "La cuenta del launcher ya funciona.\n\n"
+            "El próximo paso será conectar Microsoft OAuth "
+            "para vincular la cuenta real de Minecraft."
+        )
+
+    def prepare_steam_link(self):
+        self.show_account_message(
+            "Vincular Steam",
+            "La cuenta del launcher ya funciona.\n\n"
+            "Después conectaremos Steam OpenID mediante "
+            "el backend."
+        )
+
     # =====================================================
     # REAL SERVER STATUS
     # =====================================================

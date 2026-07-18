@@ -1,0 +1,7 @@
+{
+  "account_api_url": "http://127.0.0.1:8000",
+  "accounts_enabled": true,
+  "maintenance": false,
+  "maintenance_message": "",
+  "minimum_launcher_version": "0.3"
+}

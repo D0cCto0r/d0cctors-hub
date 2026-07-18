@@ -3,5 +3,5 @@
   "accounts_enabled": true,
   "maintenance": false,
   "maintenance_message": "Estamos haciendo mantenimiento de cuentas",
-  "minimum_launcher_version": "99.0"
+  "minimum_launcher_version": "0.3"
 }

@@ -3,6 +3,35 @@ APP_STAGE = "Beta"
 APP_BUILD = "2026.6.5"
 APP_FULL_VERSION = f"{APP_VERSION}-{APP_BUILD}"
 
+# ===============================
+# PALETA VISUAL DEL LAUNCHER
+# ===============================
+COLOR_BG = "#04080c"
+COLOR_BG_SECONDARY = "#0e1529"
+COLOR_SIDEBAR_TOP = "#0b1019"
+COLOR_SIDEBAR_MIDDLE = "#080d15"
+COLOR_SIDEBAR_BOTTOM = "#070b11"
+
+COLOR_CARD = "#0e1529"
+COLOR_CARD_DARK = "#0d131c"
+COLOR_CARD_HOVER = "#151d29"
+
+COLOR_BORDER = "rgba(19, 28, 31)"
+COLOR_BORDER_STRONG = "rgba(19, 28, 31)"
+COLOR_BORDER_HOVER = "rgba(125,115,255,125)"
+
+COLOR_PRIMARY = "#6c63ff"
+COLOR_PRIMARY_LIGHT = "#837bff"
+COLOR_PRIMARY_DARK = "#554ce5"
+
+COLOR_TEXT = "#f3f5fb"
+COLOR_TEXT_SECONDARY = "#a8b0c1"
+COLOR_TEXT_MUTED = "#747e91"
+
+COLOR_ONLINE = "#55dc7a"
+COLOR_WARNING = "#f5bf57"
+COLOR_OFFLINE = "#ff6674"
+
 import sys
 import os
 import webbrowser
@@ -501,8 +530,6 @@ class ServerStatusWorker(QThread):
         if not host:
             raise ValueError("Falta server_ip")
 
-        started = time.perf_counter()
-
         with socket.create_connection((host, port), timeout=timeout) as sock:
             sock.settimeout(timeout)
             host_bytes = host.encode("utf-8")
@@ -534,7 +561,29 @@ class ServerStatusWorker(QThread):
                     raise ConnectionError("Respuesta Minecraft incompleta")
                 response.extend(chunk)
 
-        latency_ms = round((time.perf_counter() - started) * 1000)
+            # Ping real del protocolo Minecraft.
+            # Esto mide solo el viaje ping/pong y evita incluir DNS,
+            # conexión TCP y descarga del JSON de estado.
+            ping_payload = int(time.time_ns() // 1_000_000)
+            ping_packet = cls._encode_varint(1) + struct.pack(">q", ping_payload)
+
+            ping_started = time.perf_counter()
+            sock.sendall(cls._encode_varint(len(ping_packet)) + ping_packet)
+
+            cls._read_varint(sock)
+            pong_packet_id = cls._read_varint(sock)
+
+            if pong_packet_id != 1:
+                raise ValueError(
+                    f"Respuesta pong inesperada: {pong_packet_id}"
+                )
+
+            pong_payload = sock.recv(8)
+            if len(pong_payload) != 8:
+                raise ConnectionError("Respuesta pong incompleta")
+
+            latency_ms = round((time.perf_counter() - ping_started) * 1000)
+
         payload = json.loads(response.decode("utf-8"))
 
         players = payload.get("players", {})
@@ -1059,6 +1108,7 @@ class Launcher(QMainWindow):
         QApplication.instance().setFont(app_font)
 
         self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setWindowTitle("D0cCtor's Hub")
         self.resize(1380, 820)
         self.setMinimumSize(1180, 720)
@@ -1127,7 +1177,7 @@ class Launcher(QMainWindow):
 
         central = QWidget()
         central.setObjectName("appRoot")
-        central.setStyleSheet("#appRoot { background: #060a12; border-radius: 18px; }")
+        central.setStyleSheet("#appRoot { background: #070b12; border-radius: 18px; }")
         self.setCentralWidget(central)
 
         main_vertical = QVBoxLayout(central)
@@ -1155,11 +1205,11 @@ class Launcher(QMainWindow):
             background: qlineargradient(
                 x1:0, y1:0,
                 x2:0, y2:1,
-                stop:0 #0b1020,
-                stop:0.55 #080d18,
-                stop:1 #060a12
+                stop:0 #0b1019,
+                stop:0.55 #080d15,
+                stop:1 #070b11
             );
-            border-right: 1px solid rgba(122, 92, 255, 55);
+            border-right: 1px solid rgba(108, 99, 255, 60);
             border-top-left-radius: 18px;
             border-bottom-left-radius: 18px;
         }
@@ -1205,12 +1255,12 @@ class Launcher(QMainWindow):
             btn.setCursor(Qt.PointingHandCursor)
             btn.setProperty("navButton", True)
             btn.setProperty("iconKind", icon_kind)
-            btn.setIcon(self.get_svg_icon(icon_kind, 21, "#aeb7c8"))
+            btn.setIcon(self.get_svg_icon(icon_kind, 21, "#a8b0c1"))
             btn.setIconSize(QSize(21, 21))
             btn.setStyleSheet("""
                 QPushButton {
                     background: transparent;
-                    color: #aeb7cc;
+                    color: #a8b0c1;
                     border: 1px solid transparent;
                     border-radius: 14px;
                     text-align: left;
@@ -1218,9 +1268,9 @@ class Launcher(QMainWindow):
                     font-weight: 560;
                 }
                 QPushButton:hover {
-                    background-color: rgba(91, 108, 255, 28);
+                    background-color: rgba(108, 99, 255, 30);
                     color: #ffffff;
-                    border-color: rgba(91, 108, 255, 70);
+                    border-color: rgba(125, 115, 255, 90);
                 }
             """)
             return btn
@@ -1266,8 +1316,8 @@ class Launcher(QMainWindow):
             QFrame {
                 background:qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #0c1320,
-                    stop:1 #0a101a
+                    stop:0 #0c141f,
+                    stop:1 #091019
                 );
                 border:1px solid rgba(255,255,255,18);
                 border-radius:14px;
@@ -1292,7 +1342,7 @@ class Launcher(QMainWindow):
         status_texts.setSpacing(1)
 
         status_title = QLabel("Launcher actualizado")
-        status_title.setStyleSheet("color:#ecf2ff;font-size:12px;font-weight:700;border:none;")
+        status_title.setStyleSheet("color:#f0f3fb;font-size:12px;font-weight:700;border:none;")
 
         status_version = QLabel(f"Versión {APP_FULL_VERSION}")
         status_version.setStyleSheet("color:#7f8aa1;font-size:10px;border:none;")
@@ -1318,7 +1368,7 @@ class Launcher(QMainWindow):
         main_content.setObjectName("mainContent")
         main_content.setStyleSheet("""
             #mainContent {
-                background-color: #060a12;
+                background-color: #070b12;
                 border-top-right-radius: 18px;
                 border-bottom-right-radius: 18px;
                 border-top: 1px solid rgba(255,255,255,18);
@@ -1345,7 +1395,7 @@ class Launcher(QMainWindow):
         notify_btn.setFixedSize(36, 36)
         notify_btn.setCursor(Qt.PointingHandCursor)
         notify_btn.setStyleSheet("""
-            QPushButton { background:transparent; color:#aeb7cc; border:none; border-radius:9px; font-size:18px; }
+            QPushButton { background:transparent; color:#a8b0c1; border:none; border-radius:9px; font-size:18px; }
             QPushButton:hover { background:rgba(91,108,255,32); color:white; }
         """)
 
@@ -1353,7 +1403,7 @@ class Launcher(QMainWindow):
         profile.setObjectName("profileTop")
         profile.setFixedSize(192, 42)
         profile.setStyleSheet("""
-            #profileTop { background:#0b111d; border:1px solid rgba(255,255,255,25); border-radius:12px; }
+            #profileTop { background:#0d141f; border:1px solid rgba(255,255,255,25); border-radius:12px; }
         """)
         profile_layout = QHBoxLayout(profile)
         profile_layout.setContentsMargins(10, 5, 12, 5)
@@ -1432,7 +1482,7 @@ class Launcher(QMainWindow):
         # ===============================
         footer_label = QLabel("© 2026 D0cCtor's Hub — No afiliado con Mojang, Valve o Studio Wildcard.")
         footer_label.setFont(QFont(self.montserrat, 10))
-        footer_label.setStyleSheet("color: #555566;")
+        footer_label.setStyleSheet("color:#596174;")
         footer_label.setAlignment(Qt.AlignCenter)
         footer_label.setFixedHeight(18)
 
@@ -1516,11 +1566,11 @@ class Launcher(QMainWindow):
 
         widgets["state_dot"].setText("●")
         widgets["state_dot"].setStyleSheet(
-            f"color:{color};font-size:9px;border:none;"
+            f"color:{color};font-size:10px;border:none;"
         )
         widgets["state_label"].setText(status_text)
         widgets["state_label"].setStyleSheet(
-            f"color:{color};font-size:9px;font-weight:650;border:none;"
+            f"color:{color};font-size:10px;font-weight:700;border:none;"
         )
 
         online = int(result.get("players_online", 0) or 0)
@@ -1531,9 +1581,21 @@ class Launcher(QMainWindow):
 
         ping = result.get("ping")
         if status == "online" and ping is not None:
-            widgets["ping_label"].setText(f"{int(ping)}ms")
+            ping_value = int(ping)
+
+            if ping_value < 70:
+                ping_color = "#59da72"
+            elif ping_value <= 200:
+                ping_color = "#f5bf57"
+            else:
+                ping_color = "#ff6674"
+
+            widgets["ping_label"].setText(f"{ping_value}ms")
             widgets["ping_label"].setStyleSheet(
-                "color:#59da72;font-size:9px;font-weight:650;border:none;"
+                f"color:{ping_color};"
+                "font-size:10px;"
+                "font-weight:700;"
+                "border:none;"
             )
         else:
             widgets["ping_label"].setText("—")
@@ -1645,7 +1707,7 @@ class Launcher(QMainWindow):
     # ===============================
     # ICONOS SVG DEL LAUNCHER
     # ===============================
-    def get_svg_icon(self, icon_name, size=21, color="#aeb7c8"):
+    def get_svg_icon(self, icon_name, size=21, color="#a8b0c1"):
         cache_key = (icon_name, size, color)
         cached = self._svg_icon_cache.get(cache_key)
         if cached is not None:
@@ -1706,7 +1768,7 @@ class Launcher(QMainWindow):
         if not icon_name:
             return
 
-        color = "#ffffff" if active else "#aeb7c8"
+        color = "#ffffff" if active else "#a8b0c1"
         button.setIcon(self.get_svg_icon(icon_name, 21, color))
         button.setIconSize(QSize(21, 21))
 
@@ -1899,15 +1961,15 @@ class Launcher(QMainWindow):
             #newsFeedCard {
                 background:qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #141b27,
-                    stop:1 #101722
+                    stop:0 #151c27,
+                    stop:1 #0e141d
                 );
                 border:1px solid rgba(255,255,255,22);
                 border-radius:14px;
             }
             #newsFeedCard:hover {
-                border-color:rgba(103,116,255,105);
-                background:#151d2a;
+                border-color:rgba(125,115,255,120);
+                background:#171f2b;
             }
         """)
 
@@ -1947,9 +2009,9 @@ class Launcher(QMainWindow):
         comments_value = int(news_item.get("comments", 0) or 0)
 
         is_event = "EVENTO" in badge_text or "EVENT" in badge_text
-        badge_color = "#c183ff" if is_event else "#7c86ff"
-        badge_background = "rgba(167,92,255,35)" if is_event else "rgba(91,108,255,38)"
-        badge_border = "rgba(193,131,255,95)" if is_event else "rgba(124,134,255,95)"
+        badge_color = "#c58cff" if is_event else "#8580ff"
+        badge_background = "rgba(174,103,255,38)" if is_event else "rgba(108,99,255,42)"
+        badge_border = "rgba(197,140,255,105)" if is_event else "rgba(133,128,255,105)"
 
         top = QHBoxLayout()
         top.setSpacing(8)
@@ -1977,7 +2039,7 @@ class Launcher(QMainWindow):
         title.setWordWrap(True)
         title.setMaximumHeight(42 if compact else 48)
         title.setStyleSheet("""
-            color:#f5f7ff;
+            color:#f3f5fb;
             font-size:12px;
             font-weight:800;
             border:none;
@@ -1987,7 +2049,7 @@ class Launcher(QMainWindow):
         desc.setWordWrap(True)
         desc.setMaximumHeight(34 if compact else 52)
         desc.setStyleSheet("""
-            color:#a0aabd;
+            color:#9fa8b9;
             font-size:10px;
             border:none;
         """)
@@ -2010,7 +2072,7 @@ class Launcher(QMainWindow):
 
         like_count = QLabel(str(likes_value))
         like_count.setMinimumWidth(24)
-        like_count.setStyleSheet("color:#8f99ad;font-size:9px;border:none;")
+        like_count.setStyleSheet("color:#8c96aa;font-size:9px;border:none;")
 
         def toggle_like(checked):
             like_btn.setIcon(QIcon(self.make_icon(
@@ -2036,7 +2098,7 @@ class Launcher(QMainWindow):
 
         comment_count = QLabel(str(comments_value))
         comment_count.setMinimumWidth(24)
-        comment_count.setStyleSheet("color:#8f99ad;font-size:9px;border:none;")
+        comment_count.setStyleSheet("color:#8c96aa;font-size:9px;border:none;")
 
         open_btn = QPushButton()
         open_btn.setCursor(Qt.PointingHandCursor)
@@ -2098,7 +2160,7 @@ class Launcher(QMainWindow):
         hero.setFixedHeight(238)
         hero.setStyleSheet("""
             #hero {
-                background:#0b111d;
+                background:#0b111a;
                 border:1px solid rgba(91,108,255,70);
                 border-radius:16px;
             }
@@ -2124,10 +2186,10 @@ class Launcher(QMainWindow):
             #heroOverlay {
                 background:qlineargradient(
                     x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(3,6,12,245),
-                    stop:0.34 rgba(3,6,12,215),
-                    stop:0.60 rgba(3,6,12,95),
-                    stop:1 rgba(3,6,12,10)
+                    stop:0 rgba(5,9,18,248),
+                    stop:0.36 rgba(5,9,18,218),
+                    stop:0.65 rgba(5,9,18,92),
+                    stop:1 rgba(5,9,18,8)
                 );
                 border-radius:16px;
             }
@@ -2182,18 +2244,18 @@ class Launcher(QMainWindow):
             QPushButton {
                 background:qlineargradient(
                     x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #5361ff,
-                    stop:1 #7561ff
+                    stop:0 #655cff,
+                    stop:1 #8068ff
                 );
                 color:white;
-                border:1px solid rgba(151,158,255,125);
+                border:1px solid rgba(164,155,255,150);
                 border-radius:13px;
                 font-size:14px;
                 font-weight:800;
                 padding:0 16px;
             }
-            QPushButton:hover { background:#6873ff; }
-            QPushButton:pressed { background:#4d59df; }
+            QPushButton:hover { background:#746cff; }
+            QPushButton:pressed { background:#5951d9; }
             QPushButton:disabled {
                 background:#303750;
                 color:#7f899e;
@@ -2204,12 +2266,12 @@ class Launcher(QMainWindow):
         install_btn = QPushButton("INSTALAR")
         install_btn.setFixedSize(178, 48)
         install_btn.setCursor(Qt.PointingHandCursor)
-        install_btn.setIcon(QIcon(self.make_icon("download", 19, QColor("#eef1fa"))))
+        install_btn.setIcon(QIcon(self.make_icon("download", 19, QColor("#f1f3fa"))))
         install_btn.setIconSize(QSize(19, 19))
         install_btn.setStyleSheet("""
             QPushButton {
                 background:rgba(8,13,23,225);
-                color:#eef1fa;
+                color:#f1f3fa;
                 border:1px solid rgba(255,255,255,38);
                 border-radius:13px;
                 font-size:13px;
@@ -2268,12 +2330,12 @@ class Launcher(QMainWindow):
         dot.setStyleSheet("color:#49d17d;font-size:13px;border:none;")
         htitle = QLabel("ESTADO DE SERVIDORES")
         htitle.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
-        htitle.setStyleSheet("color:#f2f5ff;letter-spacing:1px;border:none;")
+        htitle.setStyleSheet("color:#f3f5fb;letter-spacing:1px;border:none;")
         hsub = QLabel("●  Todos los sistemas operativos")
         hsub.setStyleSheet("color:#687086;font-size:10px;border:none;")
         view_all = QPushButton("VER TODOS  ›")
         view_all.setCursor(Qt.PointingHandCursor)
-        view_all.setStyleSheet("QPushButton{background:#0b111d;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        view_all.setStyleSheet("QPushButton{background:#0b111a;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
         view_all.clicked.connect(lambda: self.switch_page(1))
         header.addWidget(dot)
         header.addWidget(htitle)
@@ -2316,20 +2378,20 @@ class Launcher(QMainWindow):
 
             card = QFrame()
             card.setObjectName("homeServerCard")
-            card.setFixedSize(245, 92)
+            card.setFixedSize(250, 84)
             card.setStyleSheet("""
                 #homeServerCard {
                     background:qlineargradient(
                         x1:0, y1:0, x2:1, y2:1,
-                        stop:0 #111821,
-                        stop:1 #0c121b
+                        stop:0 #121923,
+                        stop:1 #0d131c
                     );
                     border:1px solid rgba(255,255,255,22);
                     border-radius:13px;
                 }
                 #homeServerCard:hover {
-                    border-color:rgba(91,108,255,95);
-                    background:#121a26;
+                    border-color:rgba(125,115,255,115);
+                    background:#151d29;
                 }
             """)
 
@@ -2338,10 +2400,10 @@ class Launcher(QMainWindow):
             card_layout.setSpacing(9)
 
             icon = QLabel()
-            icon.setFixedSize(52, 52)
+            icon.setFixedSize(60, 60)
             icon.setAlignment(Qt.AlignCenter)
             icon.setStyleSheet("""
-                background:#111a2b;
+                background:#111827;
                 border:1px solid rgba(255,255,255,18);
                 border-radius:10px;
             """)
@@ -2350,25 +2412,30 @@ class Launcher(QMainWindow):
             if pm and not pm.isNull():
                 icon.setPixmap(
                     pm.scaled(
-                        46, 46,
+                        54, 54,
                         Qt.KeepAspectRatio,
                         Qt.SmoothTransformation
                     )
                 )
 
-            content = QVBoxLayout()
-            content.setSpacing(2)
+            content_widget = QWidget()
+            content_widget.setFixedHeight(60)
+            content_widget.setStyleSheet("background:transparent;border:none;")
+
+            content = QVBoxLayout(content_widget)
+            content.setSpacing(0)
             content.setContentsMargins(0, 0, 0, 0)
 
             header_row = QHBoxLayout()
             header_row.setSpacing(6)
+            header_row.setContentsMargins(0, 0, 0, 0)
 
             title_block = QVBoxLayout()
             title_block.setSpacing(0)
 
             name = QLabel(server_name)
             name.setStyleSheet("""
-                color:#f5f7ff;
+                color:#f3f5fb;
                 font-size:12px;
                 font-weight:750;
                 border:none;
@@ -2381,7 +2448,7 @@ class Launcher(QMainWindow):
             )
             version = QLabel(version_text)
             version.setStyleSheet("""
-                color:#7f899d;
+                color:#7d8799;
                 font-size:10px;
                 border:none;
             """)
@@ -2425,6 +2492,7 @@ class Launcher(QMainWindow):
 
             footer_row = QHBoxLayout()
             footer_row.setSpacing(4)
+            footer_row.setContentsMargins(0, 0, 0, 0)
 
             state_dot = QLabel("●")
             state_dot.setStyleSheet(
@@ -2439,9 +2507,16 @@ class Launcher(QMainWindow):
             )
 
             if server_status == "online" and ping is not None:
-                ping_label = QLabel(f"{int(ping)}ms")
-                ping_label.setStyleSheet("""
-                    color:#59da72;
+                ping_value = int(ping)
+                ping_color = (
+                    "#59da72" if ping_value < 70
+                    else "#f5bf57" if ping_value <= 200
+                    else "#ff6674"
+                )
+
+                ping_label = QLabel(f"{ping_value}ms")
+                ping_label.setStyleSheet(f"""
+                    color:{ping_color};
                     font-size:10px;
                     font-weight:700;
                     border:none;
@@ -2463,8 +2538,8 @@ class Launcher(QMainWindow):
             content.addStretch()
             content.addLayout(footer_row)
 
-            card_layout.addWidget(icon)
-            card_layout.addLayout(content, 1)
+            card_layout.addWidget(icon, alignment=Qt.AlignVCenter)
+            card_layout.addWidget(content_widget, 1, alignment=Qt.AlignVCenter)
 
             self.home_server_status_widgets[server_name] = {
                 "state_dot": state_dot,
@@ -2489,10 +2564,10 @@ class Launcher(QMainWindow):
         news_head.setContentsMargins(0, 10, 0, 0)
         news_title = QLabel("NOTICIAS DESTACADAS")
         news_title.setFont(QFont(self.montserrat, 11, QFont.Weight.Bold))
-        news_title.setStyleSheet("color:#f2f5ff;letter-spacing:1px;border:none;")
+        news_title.setStyleSheet("color:#f3f5fb;letter-spacing:1px;border:none;")
         news_more = QPushButton("VER TODAS  ›")
         news_more.setCursor(Qt.PointingHandCursor)
-        news_more.setStyleSheet("QPushButton{background:#0b111d;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
+        news_more.setStyleSheet("QPushButton{background:#0b111a;color:#c7cee0;border:1px solid rgba(255,255,255,24);border-radius:8px;padding:7px 13px;font-weight:650;} QPushButton:hover{border-color:#6572ff;color:white;}")
         news_more.clicked.connect(lambda: self.switch_page(2))
         news_head.addWidget(news_title)
         news_head.addStretch()
@@ -2514,7 +2589,7 @@ class Launcher(QMainWindow):
         act.setContentsMargins(16,12,16,12)
         act.setSpacing(8)
         atitle = QLabel("ACTIVIDAD RECIENTE")
-        atitle.setStyleSheet("color:#f2f5ff;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
+        atitle.setStyleSheet("color:#f3f5fb;font-size:11px;font-weight:800;letter-spacing:1px;border:none;")
         act.addWidget(atitle)
         activities = [
             ("●", "ShibuyaSMP disponible", "Servidor online"),
@@ -2533,7 +2608,7 @@ class Launcher(QMainWindow):
             t = QLabel(title_text)
             t.setStyleSheet("color:#dce2ef;font-size:10px;font-weight:650;border:none;")
             d = QLabel(detail)
-            d.setStyleSheet("color:#747d91;font-size:9px;border:none;")
+            d.setStyleSheet("color:#747e91;font-size:9px;border:none;")
             texts.addWidget(t)
             texts.addWidget(d)
             row.addWidget(ico)
@@ -2809,7 +2884,7 @@ class Launcher(QMainWindow):
 
         title = QLabel("NOTICIAS DE LA COMUNIDAD")
         title.setFont(QFont(self.montserrat, 17, QFont.Weight.Bold))
-        title.setStyleSheet("color:#f5f7ff;letter-spacing:1px;border:none;")
+        title.setStyleSheet("color:#f3f5fb;letter-spacing:1px;border:none;")
 
         subtitle = QLabel(
             "Actualizaciones, eventos y novedades de D0cCtor's Hub y sus servidores."
@@ -3442,9 +3517,9 @@ class Launcher(QMainWindow):
             if is_active:
                 button.setStyleSheet("""
                     QPushButton {
-                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(75,88,255,90),stop:1 rgba(92,70,190,55));
+                        background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 rgba(108,99,255,100),stop:1 rgba(108,99,255,38));
                         color:white;
-                        border:1px solid rgba(103,116,255,150);
+                        border:1px solid rgba(125,115,255,165);
                         border-radius:14px;
                         text-align:left;
                         padding-left:16px;
@@ -3455,7 +3530,7 @@ class Launcher(QMainWindow):
                 button.setStyleSheet("""
                     QPushButton {
                         background:transparent;
-                        color:#aeb7cc;
+                        color:#a8b0c1;
                         border:1px solid transparent;
                         border-radius:14px;
                         text-align:left;

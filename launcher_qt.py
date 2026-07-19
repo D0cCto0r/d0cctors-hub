@@ -68,7 +68,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QFrame, QComboBox, QFileDialog, QScrollArea,
     QStackedLayout, QGraphicsOpacityEffect, QGraphicsDropShadowEffect, QSizePolicy,
-    QLineEdit, QTabWidget
+    QLineEdit, QTabWidget, QTextEdit
 )
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QPointF, QRectF, QSize
 from PySide6.QtGui import QFont, QIcon, QPen, QPolygonF
@@ -82,6 +82,7 @@ import subprocess
 import socket
 import struct
 import json
+import hashlib
 import time
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -94,175 +95,389 @@ from PySide6.QtGui import QColor
 
 
 class ServerCard(QFrame):
-    def __init__(self, title, description, font_family, pixmap, installed=False, click_callback=None, large=False):
+    def __init__(
+        self,
+        title,
+        description,
+        font_family,
+        pixmap,
+        installed=False,
+        click_callback=None,
+        large=False,
+        server_data=None
+    ):
         super().__init__()
 
         self.title = title
         self.click_callback = click_callback
+        self.server_data = server_data or {}
 
         if large:
-            self.setFixedSize(660, 140)
+            self.setFixedHeight(198)
+            self.setMinimumWidth(0)
+            self.setSizePolicy(
+                QSizePolicy.Expanding,
+                QSizePolicy.Fixed
+            )
         else:
             self.setFixedSize(200, 180)
 
+        self.setObjectName("serverCard")
         self.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a22;
-                border-radius: 12px;
+            QFrame#serverCard {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #141d2a,
+                    stop:1 #0d141f
+                );
+                border:1px solid rgba(255,255,255,20);
+                border-radius:16px;
+            }
+            QFrame#serverCard:hover {
+                border-color:rgba(126,116,255,80);
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #182232,
+                    stop:1 #101824
+                );
+            }
+            QLabel {
+                background:transparent;
+                border:none;
             }
         """)
 
-        # ===== LAYOUT =====
-        if large:
-            layout = QHBoxLayout(self)
-        else:
-            layout = QVBoxLayout(self)
+        layout = (
+            QHBoxLayout(self)
+            if large
+            else QVBoxLayout(self)
+        )
+        layout.setContentsMargins(
+            18 if large else 15,
+            16 if large else 15,
+            18 if large else 15,
+            16 if large else 15
+        )
+        layout.setSpacing(16 if large else 10)
 
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
-
-        # ===== IMAGEN =====
         image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+
+        image_size = 148 if large else 120
+        image_label.setFixedSize(
+            image_size,
+            image_size
+        )
+        image_label.setStyleSheet("""
+            background:#090f18;
+            border:1px solid rgba(255,255,255,18);
+            border-radius:13px;
+        """)
 
         if pixmap and not pixmap.isNull():
             scaled = pixmap.scaled(
-                120,
-                120,
-                Qt.KeepAspectRatio,
+                image_size,
+                image_size,
+                Qt.KeepAspectRatioByExpanding,
                 Qt.SmoothTransformation
             )
-            image_label.setPixmap(scaled)
-        else:
-            fallback = self.parent().get_remote_asset("default.png").scaled(
-                120,
-                120,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+            x = max(
+                0,
+                (scaled.width() - image_size) // 2
             )
-            image_label.setPixmap(fallback)
+            y = max(
+                0,
+                (scaled.height() - image_size) // 2
+            )
+            image_label.setPixmap(
+                scaled.copy(
+                    x,
+                    y,
+                    image_size,
+                    image_size
+                )
+            )
 
-        image_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(image_label)
 
-        # ===== TITULO =====
         title_label = QLabel(title)
-        title_font = QFont(font_family, 16)
-        title_font.setWeight(QFont.Weight.DemiBold)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: white;")
+        title_label.setFont(
+            QFont(
+                font_family,
+                16 if large else 13,
+                QFont.Weight.Bold
+            )
+        )
+        title_label.setStyleSheet(
+            "color:#f3f5fb;"
+        )
+
         if large:
-            title_label.setAlignment(Qt.AlignLeft)
+            content = QVBoxLayout()
+            content.setSpacing(8)
+            content.setContentsMargins(0, 1, 0, 1)
+
+            description_label = QLabel(description)
+            description_label.setWordWrap(True)
+            description_label.setMaximumHeight(58)
+            description_label.setStyleSheet(
+                "color:#aab3c3;font-size:11px;"
+            )
+
+            version_text = (
+                self.server_data.get("mc_version")
+                or self.server_data.get("map")
+                or self.server_data.get("type", "Servidor")
+            )
+            version_label = QLabel(str(version_text))
+            version_label.setStyleSheet("""
+                color:#aaa5ff;
+                background:rgba(126,116,255,16);
+                border:1px solid rgba(126,116,255,38);
+                border-radius:7px;
+                padding:4px 7px;
+                font-size:8px;
+                font-weight:750;
+            """)
+
+            title_row = QHBoxLayout()
+            title_row.setSpacing(8)
+            title_row.addWidget(title_label)
+            title_row.addWidget(version_label)
+            title_row.addStretch()
+
+            metrics_panel = QFrame()
+            metrics_panel.setObjectName("serverMetricsPanel")
+            metrics_panel.setFixedHeight(50)
+            metrics_panel.setStyleSheet("""
+                QFrame#serverMetricsPanel {
+                    background:rgba(255,255,255,7);
+                    border:1px solid rgba(255,255,255,16);
+                    border-radius:10px;
+                }
+                QFrame#serverMetricsPanel QLabel {
+                    background:transparent;
+                    border:none;
+                }
+                QFrame#serverMetricsPanel QWidget {
+                    background:transparent;
+                    border:none;
+                }
+            """)
+
+            metrics = QHBoxLayout(metrics_panel)
+            metrics.setContentsMargins(12, 6, 12, 6)
+            metrics.setSpacing(0)
+
+            def metric_item(label_text):
+                item = QWidget()
+                item_layout = QVBoxLayout(item)
+                item_layout.setContentsMargins(8, 0, 8, 0)
+                item_layout.setSpacing(1)
+
+                caption = QLabel(label_text)
+                caption.setAlignment(Qt.AlignCenter)
+                caption.setStyleSheet(
+                    "color:#7f8a9e;font-size:8px;"
+                    "font-weight:750;border:none;"
+                )
+
+                value = QLabel("—")
+                value.setAlignment(Qt.AlignCenter)
+                value.setStyleSheet(
+                    "color:#d7dbea;font-size:11px;"
+                    "font-weight:800;border:none;"
+                )
+
+                item_layout.addWidget(caption)
+                item_layout.addWidget(value)
+                return item, value
+
+            state_item = QWidget()
+            state_layout = QVBoxLayout(state_item)
+            state_layout.setContentsMargins(8, 0, 8, 0)
+            state_layout.setSpacing(1)
+
+            state_caption = QLabel("ESTADO")
+            state_caption.setAlignment(Qt.AlignCenter)
+            state_caption.setStyleSheet(
+                "color:#7f8a9e;font-size:8px;"
+                "font-weight:750;border:none;"
+            )
+
+            state_value_row = QHBoxLayout()
+            state_value_row.setContentsMargins(0, 0, 0, 0)
+            state_value_row.setSpacing(4)
+            state_value_row.setAlignment(Qt.AlignCenter)
+
+            self.state_dot = QLabel("●")
+            self.state_dot.setFixedWidth(10)
+            self.state_dot.setAlignment(Qt.AlignCenter)
+            self.state_dot.setStyleSheet(
+                "color:#687286;font-size:10px;border:none;"
+            )
+
+            self.state_label = QLabel("Comprobando")
+            self.state_label.setAlignment(Qt.AlignCenter)
+            self.state_label.setStyleSheet(
+                "color:#9aa4b7;font-size:11px;"
+                "font-weight:800;border:none;"
+            )
+
+            state_value_row.addWidget(self.state_dot)
+            state_value_row.addWidget(self.state_label)
+
+            state_layout.addWidget(state_caption)
+            state_layout.addLayout(state_value_row)
+
+            players_item, self.players_label = metric_item(
+                "JUGADORES"
+            )
+            ping_item, self.ping_label = metric_item(
+                "PING"
+            )
+
+            separator_one = QFrame()
+            separator_one.setFixedWidth(1)
+            separator_one.setStyleSheet(
+                "background:rgba(255,255,255,18);"
+                "border:none;"
+            )
+
+            separator_two = QFrame()
+            separator_two.setFixedWidth(1)
+            separator_two.setStyleSheet(
+                "background:rgba(255,255,255,18);"
+                "border:none;"
+            )
+
+            metrics.addWidget(state_item, 1)
+            metrics.addWidget(separator_one)
+            metrics.addWidget(players_item, 1)
+            metrics.addWidget(separator_two)
+            metrics.addWidget(ping_item, 1)
+
+            content.addLayout(title_row)
+            content.addWidget(description_label)
+            content.addStretch()
+            content.addWidget(metrics_panel)
+
+            layout.addLayout(content, 1)
+
+            actions = QVBoxLayout()
+            actions.setSpacing(8)
+            actions.setAlignment(Qt.AlignVCenter)
+
+            self.button = QPushButton(
+                "Jugar" if installed else "Instalar"
+            )
+            self.button.setFixedSize(156, 44)
+            self.button.setCursor(
+                Qt.PointingHandCursor
+            )
+
+            if installed:
+                self.button.setStyleSheet("""
+                    QPushButton {
+                        background:qlineargradient(
+                            x1:0,y1:0,x2:1,y2:0,
+                            stop:0 #ff315d,
+                            stop:1 #ff5a7b
+                        );
+                        color:white;
+                        border:1px solid rgba(255,255,255,32);
+                        border-radius:12px;
+                        font-size:12px;
+                        font-weight:850;
+                    }
+                    QPushButton:hover {
+                        background:qlineargradient(
+                            x1:0,y1:0,x2:1,y2:0,
+                            stop:0 #ff416b,
+                            stop:1 #ff6b88
+                        );
+                    }
+                """)
+            else:
+                self.button.setStyleSheet("""
+                    QPushButton {
+                        background:#f2f4f8;
+                        color:#111722;
+                        border:none;
+                        border-radius:12px;
+                        font-size:12px;
+                        font-weight:850;
+                    }
+                    QPushButton:hover {
+                        background:white;
+                    }
+                """)
+
+            self.reset_btn = QPushButton(
+                "Reinstalar mods"
+            )
+            self.reset_btn.setFixedSize(156, 32)
+            self.reset_btn.setCursor(
+                Qt.PointingHandCursor
+            )
+            self.reset_btn.setStyleSheet("""
+                QPushButton {
+                    background:rgba(255,255,255,8);
+                    color:#aeb7c8;
+                    border:1px solid rgba(255,255,255,18);
+                    border-radius:9px;
+                    font-size:9px;
+                    font-weight:700;
+                }
+                QPushButton:hover {
+                    color:white;
+                    border-color:rgba(126,116,255,80);
+                }
+            """)
+            self.reset_btn.setVisible(
+                "ark" in self.title.lower()
+            )
+
+            actions.addWidget(self.button)
+            actions.addWidget(self.reset_btn)
+            layout.addLayout(actions)
+
         else:
-            title_label.setAlignment(Qt.AlignCenter)
-
-        # ===== DESCRIPCIÓN (solo en cards grandes) =====
-        if large:
-
-            desc_label = QLabel(description)
-            desc_label.setStyleSheet("color: #aaaaaa;")
-            desc_label.setWordWrap(True)
-            desc_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-            desc_label.setContentsMargins(0, 0, 0, 0)
-
-
-            text_layout = QVBoxLayout()
-            text_layout.setSpacing(2)
-            text_layout.setContentsMargins(0, 0, 0, 0)
-
-            text_layout.addWidget(title_label, alignment=Qt.AlignTop)
-            text_layout.addWidget(desc_label, alignment=Qt.AlignTop)
-            text_layout.addStretch()
-
-            layout.addLayout(text_layout)
-            layout.addStretch()
-
-        else:
-
             layout.addWidget(title_label)
             layout.addStretch()
 
-        # ===== BOTÓN =====
-        self.button = QPushButton()
-        self.button.setFixedSize(150, 30)
-        self.button.setCursor(Qt.PointingHandCursor)
-        
-        # ===== BOTÓN REINSTALAR MODS (solo Ark) =====
-        self.reset_btn = QPushButton("Reinstalar Mods")
-        self.reset_btn.setFixedSize(150, 25)
-        self.reset_btn.setCursor(Qt.PointingHandCursor)
-        self.reset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a35;
-                color: white;
-                border-radius: 10px;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a45;
-            }
-        """)
+            self.button = QPushButton(
+                "Jugar" if installed else "Instalar"
+            )
+            self.button.setFixedSize(150, 30)
 
-        self.reset_btn.hide()  # oculto por defecto
+            self.reset_btn = QPushButton(
+                "Reinstalar Mods"
+            )
+            self.reset_btn.hide()
 
-        if installed:
-            self.button.setText("Jugar")
-            self.button.setStyleSheet("""
-                QPushButton {
-                    background-color: #ff2d55;
-                    color: white;
-                    border-radius: 12px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #ff4d6d;
-                }
-            """)
-        else:
-            self.button.setText("Instalar")
-            self.button.setStyleSheet("""
-                QPushButton {
-                    background-color: white;
-                    color: black;
-                    border-radius: 12px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #dddddd;
-                }
-            """)
+            layout.addWidget(self.button)
+            layout.addWidget(self.reset_btn)
 
-        # ===== GLOW =====
-        self.glow = QGraphicsDropShadowEffect()
-        self.glow.setBlurRadius(25)
-        self.glow.setOffset(0)
-        self.glow.setColor(QColor(255, 255, 255, 120))
-        self.button.setGraphicsEffect(self.glow)
-
-        # ===== HOVER =====
-        self.button.enterEvent = self.enter_glow
-        self.button.leaveEvent = self.leave_glow
-
-        layout.addWidget(self.button, alignment=Qt.AlignCenter)
-        layout.addWidget(self.reset_btn, alignment=Qt.AlignCenter)
-        self.reset_btn.clicked.connect(self.reset_mods)
-
-        # ===== CLICK CALLBACK =====
         if self.click_callback:
-            self.button.clicked.connect(lambda: self.click_callback(self.title))
-            
-        # Mostrar botón solo si es Ark
-        if self.title.lower() == "ark survival":
-            self.reset_btn.show()
+            self.button.clicked.connect(
+                lambda: self.click_callback(self.title)
+            )
+            self.reset_btn.clicked.connect(
+                self.reset_mods
+            )
 
-    def enter_glow(self, event):
-        self.glow.setColor(QColor(255, 255, 255, 255))
-        self.glow.setBlurRadius(40)
+    def status_widgets(self):
+        if not hasattr(self, "state_label"):
+            return None
 
-    def leave_glow(self, event):
-        self.glow.setColor(QColor(255, 255, 255, 120))
-        self.glow.setBlurRadius(25)
-        
+        return {
+            "state_dot": self.state_dot,
+            "state_label": self.state_label,
+            "players_label": self.players_label,
+            "ping_label": self.ping_label,
+        }
+
     def reset_mods(self):
         if self.click_callback:
             self.click_callback("__RESET_MODS__")
@@ -276,31 +491,72 @@ from PySide6.QtGui import QPainter, QRadialGradient, QBrush
 class GlowLogo(QLabel):
     def __init__(self, pixmap):
         super().__init__()
-        self.setPixmap(pixmap)
+        self.logo_pixmap = pixmap
+        self.float_offset = 0.0
         self.setAlignment(Qt.AlignCenter)
-        self.setFixedSize(pixmap.size())
-        self.glow_radius = 65  # tamaño del aura
-        self.glow_strength = 10  # intensidad
+
+        padding = 24
+        self.setFixedSize(
+            pixmap.width() + padding * 2,
+            pixmap.height() + padding * 2
+        )
+
+        self.glow_radius = min(
+            self.width(),
+            self.height()
+        ) * 0.42
+
+    def set_float_offset(self, offset):
+        self.float_offset = float(offset)
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        # Centro del widget
-        center = self.rect().center()
+        center = QPointF(
+            self.rect().center().x(),
+            self.rect().center().y() + self.float_offset
+        )
 
-        # Gradiente radial
-        gradient = QRadialGradient(center, self.glow_radius)
-        gradient.setColorAt(0.0, QColor(255, 255, 255, self.glow_strength))
-        gradient.setColorAt(0.5, QColor(255, 255, 255, 80))
-        gradient.setColorAt(1.0, QColor(255, 255, 255, 0))
+        gradient = QRadialGradient(
+            center,
+            self.glow_radius
+        )
+        gradient.setColorAt(
+            0.0,
+            QColor(126, 116, 255, 42)
+        )
+        gradient.setColorAt(
+            0.55,
+            QColor(126, 116, 255, 16)
+        )
+        gradient.setColorAt(
+            1.0,
+            QColor(126, 116, 255, 0)
+        )
 
-        painter.setBrush(QBrush(gradient))
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(center, self.glow_radius, self.glow_radius)
+        painter.setBrush(QBrush(gradient))
+        painter.drawEllipse(
+            center,
+            self.glow_radius,
+            self.glow_radius
+        )
 
-        # Dibuja el logo encima
-        super().paintEvent(event)
+        x = (
+            self.width() - self.logo_pixmap.width()
+        ) // 2
+        y = (
+            self.height() - self.logo_pixmap.height()
+        ) // 2 + int(self.float_offset)
+
+        painter.drawPixmap(
+            x,
+            y,
+            self.logo_pixmap
+        )
 
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtGui import QPainter, QPainterPath
@@ -838,11 +1094,24 @@ class RemoteConfigWorker(QThread):
 
     def run(self):
         try:
+            separator = (
+                "&"
+                if "?" in REMOTE_LAUNCHER_CONFIG_URL
+                else "?"
+            )
+            request_url = (
+                REMOTE_LAUNCHER_CONFIG_URL
+                + separator
+                + f"_ts={int(time.time())}"
+            )
+
             response = requests.get(
-                REMOTE_LAUNCHER_CONFIG_URL,
+                request_url,
                 timeout=REMOTE_CONFIG_TIMEOUT_SECONDS,
                 headers={
-                    "User-Agent": "D0cCtors-Hub-Launcher"
+                    "User-Agent": "D0cCtors-Hub-Launcher",
+                    "Cache-Control": "no-cache, no-store",
+                    "Pragma": "no-cache",
                 },
             )
             response.raise_for_status()
@@ -1229,6 +1498,7 @@ class Launcher(QMainWindow):
         self.news_data = []
         self._svg_icon_cache = {}
         self.home_server_status_widgets = {}
+        self.servers_page_status_widgets = {}
         self.server_status_worker = None
         self.account_api_workers = []
         
@@ -1266,11 +1536,13 @@ class Launcher(QMainWindow):
         )
         self.remote_config_worker = None
         self.remote_config = self.load_cached_remote_config()
-        self.accounts_enabled = bool(
-            self.remote_config.get("accounts_enabled", True)
+        self.accounts_enabled = self.config_bool(
+            self.remote_config.get("accounts_enabled", True),
+            True
         )
-        self.accounts_maintenance = bool(
-            self.remote_config.get("maintenance", False)
+        self.accounts_maintenance = self.config_bool(
+            self.remote_config.get("maintenance", False),
+            False
         )
         self.accounts_maintenance_message = str(
             self.remote_config.get(
@@ -1284,6 +1556,14 @@ class Launcher(QMainWindow):
         # ===============================
         self.account_file = os.path.join(self.base_path, "account.json")
         self.account_data = self.load_local_account()
+
+        # Estado persistente de likes y comentarios de noticias.
+        self.news_interactions_file = os.path.join(
+            self.base_path,
+            "news_interactions.json"
+        )
+        self.news_interactions = self.load_news_interactions()
+        self.news_interaction_widgets = {}
         
         # ===== CARGAR MONTSERRAT VARIABLE =====
         font_path = resource_path("Montserrat-VariableFont_wght.ttf")
@@ -1430,7 +1710,8 @@ class Launcher(QMainWindow):
         logo_container.addStretch()
 
         sidebar_layout.addLayout(logo_container)
-        sidebar_layout.addSpacing(25)
+        sidebar_layout.addSpacing(8)
+        sidebar_layout.addStretch(1)
 
         # Animación flotante
         self.float_direction = 1
@@ -1499,14 +1780,13 @@ class Launcher(QMainWindow):
         self.btn_support.clicked.connect(lambda: self.switch_page(4))
         self.btn_store.clicked.connect(lambda: self.switch_page(5))
 
-        sidebar_layout.addSpacing(10)
-        sidebar_layout.addStretch()
+        sidebar_layout.addStretch(1)
 
         # ===============================
         # CUENTA DEL USUARIO
         # ===============================
         self.account_card = QPushButton()
-        self.account_card.setFixedHeight(92)
+        self.account_card.setFixedHeight(88)
         self.account_card.setCursor(Qt.PointingHandCursor)
         self.account_card.setStyleSheet("""
             QPushButton {
@@ -1526,17 +1806,17 @@ class Launcher(QMainWindow):
         """)
 
         account_layout = QHBoxLayout(self.account_card)
-        account_layout.setContentsMargins(12, 10, 10, 10)
-        account_layout.setSpacing(10)
+        account_layout.setContentsMargins(7, 8, 7, 8)
+        account_layout.setSpacing(5)
 
         account_avatar = QLabel()
-        account_avatar.setFixedSize(48, 48)
+        account_avatar.setFixedSize(30, 30)
         account_avatar.setAlignment(Qt.AlignCenter)
         account_pm = self.get_remote_asset("logo.png")
         if account_pm and not account_pm.isNull():
             account_avatar.setPixmap(
                 account_pm.scaled(
-                    44, 44,
+                    27, 27,
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 )
@@ -1545,43 +1825,28 @@ class Launcher(QMainWindow):
         account_texts = QVBoxLayout()
         account_texts.setSpacing(1)
 
-        connected_label = QLabel("CONECTADO COMO")
-        connected_label.setStyleSheet(
-            "color:#837bff;font-size:8px;font-weight:800;"
+        self.account_connected_label = QLabel("CUENTA DEL LAUNCHER")
+        self.account_connected_label.setWordWrap(False)
+        self.account_connected_label.setStyleSheet(
+            "color:#918aff;font-size:8px;font-weight:800;"
             "letter-spacing:0.5px;border:none;background:transparent;"
         )
 
         self.account_name_label = QLabel()
+        self.account_name_label.setWordWrap(False)
         self.account_name_label.setStyleSheet(
             "color:#f3f5fb;font-size:12px;font-weight:750;"
             "border:none;background:transparent;"
         )
 
         self.account_status_label = QLabel()
-        self.account_api_status_label = QLabel()
-        self.account_api_status_label.setStyleSheet(
-            "color:#747e91;font-size:8px;border:none;"
-            "background:transparent;"
-        )
 
-        account_texts.addWidget(connected_label)
+        account_texts.addWidget(self.account_connected_label)
         account_texts.addWidget(self.account_name_label)
         account_texts.addWidget(self.account_status_label)
-        account_texts.addWidget(self.account_api_status_label)
-
-        account_arrow = QLabel()
-        account_arrow.setFixedSize(18, 18)
-        account_arrow.setPixmap(
-            self.make_icon("chevron", 13, QColor("#98a3b7"))
-        )
-        account_arrow.setAlignment(Qt.AlignCenter)
-        account_arrow.setStyleSheet(
-            "background:transparent;border:none;"
-        )
 
         account_layout.addWidget(account_avatar)
         account_layout.addLayout(account_texts, 1)
-        account_layout.addWidget(account_arrow)
 
         self.account_card.clicked.connect(self.open_account_dialog)
         self.refresh_account_card()
@@ -1600,13 +1865,19 @@ class Launcher(QMainWindow):
             ACCOUNT_HEALTH_INTERVAL_MS
         )
 
+        self.remote_config_timer = QTimer(self)
+        self.remote_config_timer.timeout.connect(
+            self.fetch_remote_launcher_config
+        )
+        self.remote_config_timer.start(60000)
+
         sidebar_layout.addSpacing(6)
 
         # ===============================
         # STATUS PANEL (ABAJO SIDEBAR)
         # ===============================
         status_card = QFrame()
-        status_card.setFixedHeight(68)
+        status_card.setFixedHeight(88)
         status_card.setStyleSheet("""
             QFrame {
                 background:qlineargradient(
@@ -1620,39 +1891,51 @@ class Launcher(QMainWindow):
         """)
 
         status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(12, 10, 12, 10)
-        status_layout.setSpacing(12)
+        status_layout.setContentsMargins(10, 9, 10, 9)
+        status_layout.setSpacing(9)
 
-        status_icon = QLabel()
-        status_icon.setFixedSize(28, 28)
-        status_icon.setPixmap(self.make_icon("check", 18, QColor("#5ee07a")))
-        status_icon.setAlignment(Qt.AlignCenter)
-        status_icon.setStyleSheet("""
+        self.launcher_status_icon = QLabel()
+        self.launcher_status_icon.setFixedSize(26, 26)
+        self.launcher_status_icon.setPixmap(
+            self.make_icon("check", 16, QColor("#5ee07a"))
+        )
+        self.launcher_status_icon.setAlignment(Qt.AlignCenter)
+        self.launcher_status_icon.setStyleSheet("""
             background:rgba(94,224,122,0.12);
             border:1px solid rgba(94,224,122,0.20);
-            border-radius:14px;
+            border-radius:13px;
         """)
 
         status_texts = QVBoxLayout()
-        status_texts.setSpacing(1)
+        status_texts.setSpacing(0)
 
-        status_title = QLabel("Launcher actualizado")
-        status_title.setStyleSheet("color:#f0f3fb;font-size:12px;font-weight:700;border:none;")
+        self.launcher_status_title = QLabel("Launcher actualizado")
+        self.launcher_status_title.setWordWrap(False)
+        self.launcher_status_title.setStyleSheet(
+            "color:#f0f3fb;font-size:11px;font-weight:750;border:none;"
+        )
 
         status_version = QLabel(f"Versión {APP_FULL_VERSION}")
-        status_version.setStyleSheet("color:#7f8aa1;font-size:10px;border:none;")
+        status_version.setStyleSheet(
+            "color:#929caf;font-size:10px;border:none;"
+        )
 
-        status_texts.addWidget(status_title)
+        self.launcher_services_label = QLabel("Servicios comprobando...")
+        self.launcher_services_label.setWordWrap(False)
+        self.launcher_services_label.setStyleSheet(
+            "color:#929caf;font-size:10px;border:none;"
+        )
+
+        status_texts.addWidget(self.launcher_status_title)
         status_texts.addWidget(status_version)
+        status_texts.addWidget(self.launcher_services_label)
 
-        status_arrow = QLabel()
-        status_arrow.setPixmap(self.make_icon("chevron", 14, QColor("#99a5bb")))
-        status_arrow.setAlignment(Qt.AlignCenter)
-        status_arrow.setStyleSheet("background:transparent;border:none;")
-
-        status_layout.addWidget(status_icon)
+        status_layout.addWidget(
+            self.launcher_status_icon,
+            0,
+            Qt.AlignVCenter
+        )
         status_layout.addLayout(status_texts, 1)
-        status_layout.addWidget(status_arrow)
 
         sidebar_layout.addWidget(status_card)
 
@@ -1685,13 +1968,23 @@ class Launcher(QMainWindow):
         topbar.setSpacing(8)
         topbar.addStretch()
 
-        notify_btn = QPushButton("♢")
+        notify_btn = QPushButton()
         notify_btn.setToolTip("Notificaciones")
         notify_btn.setFixedSize(36, 36)
         notify_btn.setCursor(Qt.PointingHandCursor)
+        notify_btn.setIcon(
+            self.get_svg_icon("notification", 20, "#a8b0c1")
+        )
+        notify_btn.setIconSize(QSize(20, 20))
         notify_btn.setStyleSheet("""
-            QPushButton { background:transparent; color:#a8b0c1; border:none; border-radius:9px; font-size:18px; }
-            QPushButton:hover { background:rgba(91,108,255,32); color:white; }
+            QPushButton {
+                background:transparent;
+                border:none;
+                border-radius:9px;
+            }
+            QPushButton:hover {
+                background:rgba(91,108,255,32);
+            }
         """)
 
         def window_button(icon_kind, hover_bg):
@@ -1783,7 +2076,7 @@ class Launcher(QMainWindow):
         QTimer.singleShot(60, self._refresh_home_layout)
         
         # Cargar RAM guardada
-        saved_ram = self.config_manager.get("ram", "4 GB")
+        saved_ram = self.config_manager.get("ram", "8 GB")
         index = self.ram_selector.findText(saved_ram)
         if index >= 0:
             self.ram_selector.setCurrentIndex(index)
@@ -1796,6 +2089,457 @@ class Launcher(QMainWindow):
         self.check_for_updates()
             
         
+    def load_news_interactions(self):
+        try:
+            if os.path.exists(self.news_interactions_file):
+                with open(
+                    self.news_interactions_file,
+                    "r",
+                    encoding="utf-8"
+                ) as file:
+                    data = json.load(file)
+                    if isinstance(data, dict):
+                        return data
+        except Exception as exc:
+            print("No se pudieron cargar interacciones:", exc)
+
+        return {}
+
+
+    def save_news_interactions(self):
+        try:
+            os.makedirs(
+                os.path.dirname(self.news_interactions_file),
+                exist_ok=True
+            )
+            with open(
+                self.news_interactions_file,
+                "w",
+                encoding="utf-8"
+            ) as file:
+                json.dump(
+                    self.news_interactions,
+                    file,
+                    ensure_ascii=False,
+                    indent=2
+                )
+        except Exception as exc:
+            print("No se pudieron guardar interacciones:", exc)
+
+
+    def news_key(self, news_item):
+        explicit = str(
+            news_item.get("id")
+            or news_item.get("slug")
+            or news_item.get("url")
+            or ""
+        ).strip()
+
+        if explicit:
+            return explicit
+
+        raw = (
+            str(news_item.get("title", ""))
+            + "|"
+            + str(news_item.get("description", ""))
+        )
+        return hashlib.sha256(
+            raw.encode("utf-8")
+        ).hexdigest()[:20]
+
+
+    def get_news_interaction(self, news_item):
+        key = self.news_key(news_item)
+        state = self.news_interactions.setdefault(
+            key,
+            {
+                "liked": False,
+                "comments": []
+            }
+        )
+        state.setdefault("liked", False)
+        state.setdefault("comments", [])
+        return key, state
+
+
+    def register_news_widgets(
+        self,
+        key,
+        like_button,
+        like_label,
+        comment_label
+    ):
+        widgets = self.news_interaction_widgets.setdefault(
+            key,
+            []
+        )
+        widgets.append(
+            {
+                "like_button": like_button,
+                "like_label": like_label,
+                "comment_label": comment_label
+            }
+        )
+
+
+    def refresh_news_interaction_widgets(
+        self,
+        key,
+        news_item=None
+    ):
+        state = self.news_interactions.get(
+            key,
+            {"liked": False, "comments": []}
+        )
+        base_likes = int(
+            (news_item or {}).get("likes", 0) or 0
+        )
+        base_comments = int(
+            (news_item or {}).get("comments", 0) or 0
+        )
+
+        liked = bool(state.get("liked"))
+        comments = state.get("comments", [])
+
+        for group in self.news_interaction_widgets.get(key, []):
+            button = group["like_button"]
+            button.blockSignals(True)
+            button.setChecked(liked)
+            button.setIcon(
+                QIcon(
+                    self.make_icon(
+                        "heart",
+                        18,
+                        QColor("#ff668c")
+                        if liked
+                        else QColor("#8994aa"),
+                        filled=liked
+                    )
+                )
+            )
+            button.blockSignals(False)
+
+            group["like_label"].setText(
+                str(base_likes + (1 if liked else 0))
+            )
+            group["comment_label"].setText(
+                str(base_comments + len(comments))
+            )
+
+
+    def toggle_news_like(self, news_item, checked):
+        key, state = self.get_news_interaction(news_item)
+        state["liked"] = bool(checked)
+        self.save_news_interactions()
+        self.refresh_news_interaction_widgets(
+            key,
+            news_item
+        )
+
+
+    def open_news_comments(self, news_item):
+        key, state = self.get_news_interaction(news_item)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Comentarios")
+        dialog.setFixedSize(560, 520)
+        dialog.setWindowFlags(
+            Qt.Dialog | Qt.FramelessWindowHint
+        )
+        dialog.setAttribute(
+            Qt.WA_TranslucentBackground,
+            True
+        )
+        dialog.setStyleSheet(
+            "QDialog { background:transparent; }"
+        )
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        panel = QFrame()
+        panel.setObjectName("commentsPanel")
+        panel.setStyleSheet("""
+            QFrame#commentsPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925,
+                    stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QLabel {
+                background:transparent;
+                border:none;
+            }
+        """)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+
+        title = QLabel("COMENTARIOS")
+        title.setStyleSheet(
+            "color:#f4f6fb;font-size:16px;font-weight:850;"
+        )
+
+        close_button = QPushButton("×")
+        close_button.setFixedSize(32, 32)
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px;
+                font-size:19px;
+            }
+            QPushButton:hover {
+                color:#ff8090;
+                background:rgba(255,92,108,25);
+            }
+        """)
+        close_button.clicked.connect(dialog.accept)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(close_button)
+
+        news_title = QLabel(
+            news_item.get("title", "Actualización")
+        )
+        news_title.setWordWrap(True)
+        news_title.setStyleSheet(
+            "color:#aaa5ff;font-size:12px;font-weight:750;"
+        )
+
+        comments_scroll = QScrollArea()
+        comments_scroll.setWidgetResizable(True)
+        comments_scroll.setFrameShape(QFrame.NoFrame)
+        comments_scroll.setStyleSheet("""
+            QScrollArea {
+                background:#0a1019;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:12px;
+            }
+            QScrollBar:vertical {
+                width:9px;
+                background:transparent;
+            }
+            QScrollBar::handle:vertical {
+                background:rgba(126,116,255,90);
+                border-radius:4px;
+                min-height:28px;
+            }
+        """)
+
+        comments_container = QWidget()
+        comments_container.setObjectName("commentsContainer")
+        comments_container.setStyleSheet("""
+            QWidget#commentsContainer {
+                background:#0a1019;
+            }
+        """)
+        comments_layout = QVBoxLayout(comments_container)
+        comments_layout.setContentsMargins(12, 12, 12, 12)
+        comments_layout.setSpacing(9)
+        comments_layout.setAlignment(Qt.AlignTop)
+
+        def render_comments():
+            while comments_layout.count():
+                item = comments_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+
+            comments = state.get("comments", [])
+
+            if not comments:
+                empty = QLabel(
+                    "Todavía no hay comentarios.\n"
+                    "Sé la primera persona en comentar."
+                )
+                empty.setAlignment(Qt.AlignCenter)
+                empty.setStyleSheet(
+                    "color:#798499;font-size:11px;"
+                    "padding:45px 10px;"
+                )
+                comments_layout.addWidget(empty)
+                return
+
+            for comment in comments:
+                card = QFrame()
+                card.setStyleSheet("""
+                    QFrame {
+                        background:#111a26;
+                        border:1px solid rgba(255,255,255,15);
+                        border-radius:11px;
+                    }
+                """)
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(12, 10, 12, 10)
+                card_layout.setSpacing(4)
+
+                author = QLabel(
+                    str(comment.get("author", "Jugador"))
+                )
+                author.setStyleSheet(
+                    "color:#aaa5ff;font-size:10px;"
+                    "font-weight:800;"
+                )
+
+                body = QLabel(
+                    str(comment.get("text", ""))
+                )
+                body.setWordWrap(True)
+                body.setStyleSheet(
+                    "color:#d6dbe6;font-size:11px;"
+                )
+
+                card_layout.addWidget(author)
+                card_layout.addWidget(body)
+                comments_layout.addWidget(card)
+
+        comments_scroll.viewport().setAutoFillBackground(True)
+        comments_scroll.viewport().setStyleSheet(
+            "background:#0a1019;border:none;"
+        )
+        comments_scroll.setWidget(comments_container)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(8)
+
+        comment_input = QLineEdit()
+        comment_input.setPlaceholderText(
+            "Escribí un comentario..."
+        )
+        comment_input.setMaxLength(280)
+        comment_input.setFixedHeight(42)
+        comment_input.setStyleSheet("""
+            QLineEdit {
+                background:#0a1019;
+                color:#f0f3f9;
+                border:1px solid rgba(255,255,255,22);
+                border-radius:11px;
+                padding:0 13px;
+                font-size:11px;
+            }
+            QLineEdit:focus {
+                border-color:rgba(126,116,255,150);
+            }
+        """)
+
+        send_button = QPushButton("Enviar")
+        send_button.setFixedSize(90, 42)
+        send_button.setCursor(Qt.PointingHandCursor)
+        send_button.setStyleSheet("""
+            QPushButton {
+                background:#6f66ff;
+                color:white;
+                border:none;
+                border-radius:11px;
+                font-size:11px;
+                font-weight:800;
+            }
+            QPushButton:hover {
+                background:#8078ff;
+            }
+        """)
+
+        def send_comment():
+            if not self.account_data.get("logged_in"):
+                QMessageBox.information(
+                    dialog,
+                    "Iniciá sesión",
+                    "Tenés que iniciar sesión para comentar."
+                )
+                return
+
+            body = comment_input.text().strip()
+            if not body:
+                return
+
+            author_name = self.account_data.get(
+                "username",
+                "Jugador"
+            )
+
+            state.setdefault("comments", []).append(
+                {
+                    "author": author_name,
+                    "text": body,
+                    "created_at": int(time.time())
+                }
+            )
+            comment_input.clear()
+            self.save_news_interactions()
+            self.refresh_news_interaction_widgets(
+                key,
+                news_item
+            )
+            render_comments()
+
+        send_button.clicked.connect(send_comment)
+        comment_input.returnPressed.connect(send_comment)
+
+        input_row.addWidget(comment_input, 1)
+        input_row.addWidget(send_button)
+
+        if not self.account_data.get("logged_in"):
+            comment_input.setEnabled(False)
+            comment_input.setPlaceholderText(
+                "Iniciá sesión para comentar"
+            )
+            send_button.setText("Iniciar sesión")
+
+            try:
+                send_button.clicked.disconnect()
+            except TypeError:
+                pass
+
+            def open_login_from_comments():
+                dialog.accept()
+                self.open_auth_dialog()
+
+            send_button.clicked.connect(
+                open_login_from_comments
+            )
+
+        layout.addLayout(header)
+        layout.addWidget(news_title)
+        layout.addWidget(comments_scroll, 1)
+        layout.addLayout(input_row)
+
+        outer.addWidget(panel)
+        render_comments()
+        dialog.exec()
+
+
+    def config_bool(self, value, default=False):
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, (int, float)):
+            return value != 0
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+
+            if normalized in {
+                "true", "1", "yes", "on", "si", "sí"
+            }:
+                return True
+
+            if normalized in {
+                "false", "0", "no", "off", ""
+            }:
+                return False
+
+        return bool(default)
+
     def default_remote_config(self):
         return {
             "account_api_url": DEFAULT_ACCOUNT_API_URL,
@@ -1870,11 +2614,13 @@ class Launcher(QMainWindow):
         )
 
         self.remote_config = config
-        self.accounts_enabled = bool(
-            config.get("accounts_enabled", True)
+        self.accounts_enabled = self.config_bool(
+            config.get("accounts_enabled", True),
+            True
         )
-        self.accounts_maintenance = bool(
-            config.get("maintenance", False)
+        self.accounts_maintenance = self.config_bool(
+            config.get("maintenance", False),
+            False
         )
         self.accounts_maintenance_message = str(
             config.get("maintenance_message", "")
@@ -1911,18 +2657,35 @@ class Launcher(QMainWindow):
 
         minimum_version = str(
             config.get("minimum_launcher_version", "0.0")
+        ).strip()
+
+        installed_version = self.current_launcher_version()
+        update_required = (
+            self.version_tuple(installed_version)
+            < self.version_tuple(minimum_version)
         )
 
-        if (
-            self.version_tuple(self.current_launcher_version())
-            < self.version_tuple(minimum_version)
-        ):
+        print(
+            "Configuración remota aplicada:",
+            {
+                "accounts_enabled": self.accounts_enabled,
+                "maintenance": self.accounts_maintenance,
+                "maintenance_message": (
+                    self.accounts_maintenance_message
+                ),
+                "minimum_launcher_version": minimum_version,
+                "installed_version": installed_version,
+                "update_required": update_required,
+                "account_api_url": self.account_api_url,
+            }
+        )
+
+        if update_required:
             self.show_account_message(
                 "Actualización requerida",
                 "Esta versión del launcher es demasiado antigua.\n\n"
                 f"Versión mínima requerida: {minimum_version}\n"
-                f"Versión instalada: "
-                f"{self.current_launcher_version()}"
+                f"Versión instalada: {installed_version}"
             )
 
         self.check_account_api_health()
@@ -1960,17 +2723,19 @@ class Launcher(QMainWindow):
                     self.load_cached_remote_config()
                 )
 
-            self.accounts_enabled = bool(
+            self.accounts_enabled = self.config_bool(
                 self.remote_config.get(
                     "accounts_enabled",
                     True
-                )
+                ),
+                True
             )
-            self.accounts_maintenance = bool(
+            self.accounts_maintenance = self.config_bool(
                 self.remote_config.get(
                     "maintenance",
                     False
-                )
+                ),
+                False
             )
             self.accounts_maintenance_message = str(
                 self.remote_config.get(
@@ -2117,104 +2882,6 @@ class Launcher(QMainWindow):
             on_completed=completed,
         )
 
-    def open_api_configuration_dialog(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Configurar API")
-        dialog.setFixedSize(470, 235)
-        self.style_account_dialog(dialog)
-
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(12)
-
-        api_header = QHBoxLayout()
-
-        title = QLabel("DIRECCIÓN DE LA API")
-        title.setStyleSheet(
-            "color:#f3f5fb;font-size:14px;font-weight:800;"
-        )
-
-        api_close_button = QPushButton("×")
-        api_close_button.setFixedSize(32, 32)
-        api_close_button.setCursor(Qt.PointingHandCursor)
-        api_close_button.clicked.connect(dialog.reject)
-        api_close_button.setStyleSheet("""
-            QPushButton {
-                background:rgba(255,255,255,8);
-                color:#98a1b2;
-                border:1px solid rgba(255,255,255,16);
-                border-radius:9px;
-                font-size:19px;
-                padding:0;
-            }
-            QPushButton:hover {
-                color:#ff8090;
-                background:rgba(255,92,108,25);
-            }
-        """)
-
-        api_header.addWidget(title, 1)
-        api_header.addWidget(api_close_button)
-
-        description = QLabel(
-            "La dirección normalmente se administra desde "
-            "launcher_config.json en GitHub. Este valor local "
-            "queda disponible como respaldo para pruebas."
-        )
-        description.setWordWrap(True)
-        description.setStyleSheet(
-            "color:#8d97aa;font-size:10px;"
-        )
-
-        url_input = self.auth_input(
-            "http://127.0.0.1:8000"
-        )
-        url_input.setText(self.account_api_url)
-
-        status = QLabel(
-            "● API conectada"
-            if self.account_api_online
-            else "● API sin conexión"
-        )
-        status.setStyleSheet(
-            (
-                "color:#55dc7a;font-size:10px;"
-                if self.account_api_online
-                else "color:#ff6674;font-size:10px;"
-            )
-        )
-
-        buttons = QHBoxLayout()
-
-        local_button = QPushButton("Usar API local")
-        local_button.clicked.connect(
-            lambda: url_input.setText(
-                DEFAULT_ACCOUNT_API_URL
-            )
-        )
-
-        save_button = self.auth_action_button("Guardar")
-        save_button.setFixedWidth(135)
-
-        def save():
-            self.save_account_api_url(url_input.text())
-            dialog.accept()
-
-        save_button.clicked.connect(save)
-
-        buttons.addWidget(local_button)
-        buttons.addStretch()
-        buttons.addWidget(save_button)
-
-        layout.addLayout(api_header)
-        layout.addWidget(description)
-        layout.addWidget(url_input)
-        layout.addWidget(status)
-        layout.addStretch()
-        layout.addLayout(buttons)
-
-        dialog.exec()
-
     def run_account_api(
         self,
         method,
@@ -2267,8 +2934,7 @@ class Launcher(QMainWindow):
             "logged_in": False,
             "username": "Invitado",
             "email": "",
-            "minecraft_linked": False,
-            "steam_linked": False,
+            "email_verified": False,
             "token": "",
             "expires_at": 0,
             "user_id": None,
@@ -2302,8 +2968,7 @@ class Launcher(QMainWindow):
             "logged_in": False,
             "username": "Invitado",
             "email": "",
-            "minecraft_linked": False,
-            "steam_linked": False,
+            "email_verified": False,
             "token": "",
             "expires_at": 0,
             "user_id": None,
@@ -2318,11 +2983,8 @@ class Launcher(QMainWindow):
             "logged_in": True,
             "username": user.get("username", "Usuario"),
             "email": user.get("email", ""),
-            "minecraft_linked": bool(
-                user.get("minecraft_linked", False)
-            ),
-            "steam_linked": bool(
-                user.get("steam_linked", False)
+            "email_verified": bool(
+                user.get("email_verified", True)
             ),
             "token": payload.get("token", ""),
             "expires_at": int(payload.get("expires_at", 0) or 0),
@@ -2338,13 +3000,22 @@ class Launcher(QMainWindow):
 
         logged_in = bool(self.account_data.get("logged_in"))
 
+        if hasattr(self, "account_connected_label"):
+            self.account_connected_label.setText(
+                "CONECTADO COMO"
+                if logged_in
+                else "CUENTA DEL LAUNCHER"
+            )
+
         self.account_name_label.setText(
             self.account_data.get("username", "Invitado")
             if logged_in else "Iniciar sesión"
         )
 
         self.account_status_label.setText(
-            "●  En línea" if logged_in else "○  Sin conexión"
+            "●  En línea"
+            if logged_in
+            else "Entrá para acceder a tu cuenta"
         )
         self.account_status_label.setStyleSheet(
             (
@@ -2353,39 +3024,30 @@ class Launcher(QMainWindow):
             )
             if logged_in
             else (
-                "color:#747e91;font-size:9px;border:none;"
+                "color:#a0a9ba;font-size:9px;border:none;"
                 "background:transparent;"
             )
         )
 
-        if hasattr(self, "account_api_status_label"):
+        if hasattr(self, "launcher_services_label"):
             if not self.accounts_enabled:
-                api_status_text = "CUENTAS ● Desactivadas"
+                service_text = "Cuentas no disponibles"
+                service_color = "#f5bf57"
             elif self.accounts_maintenance:
-                api_status_text = "CUENTAS ● Mantenimiento"
+                service_text = "Cuentas en mantenimiento"
+                service_color = "#f5bf57"
             elif self.account_api_online:
-                api_status_text = "API ● Online"
+                service_text = "Servicios online"
+                service_color = "#55dc7a"
             else:
-                api_status_text = "API ● Offline · modo local"
+                service_text = "Servicios sin conexión"
+                service_color = "#f5bf57"
 
-            self.account_api_status_label.setText(
-                api_status_text
+            self.launcher_services_label.setText(service_text)
+            self.launcher_services_label.setStyleSheet(
+                f"color:{service_color};font-size:10px;border:none;"
             )
-            self.account_api_status_label.setStyleSheet(
-                (
-                    "color:#55dc7a;font-size:8px;border:none;"
-                    "background:transparent;"
-                )
-                if (
-                    self.account_api_online
-                    and self.accounts_enabled
-                    and not self.accounts_maintenance
-                )
-                else (
-                    "color:#f5bf57;font-size:8px;border:none;"
-                    "background:transparent;"
-                )
-            )
+
 
     def api_error_text(self, response):
         try:
@@ -2627,6 +3289,225 @@ class Launcher(QMainWindow):
         """)
         return button
 
+    def open_email_verification_dialog(
+        self,
+        email,
+        parent_dialog=None,
+    ):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Verificar correo")
+        dialog.setFixedSize(440, 390)
+        dialog.setWindowFlags(
+            Qt.Dialog | Qt.FramelessWindowHint
+        )
+        dialog.setAttribute(
+            Qt.WA_TranslucentBackground,
+            True
+        )
+        dialog.setStyleSheet(
+            "QDialog { background:transparent; }"
+        )
+
+        outer = QVBoxLayout(dialog)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        panel = QFrame()
+        panel.setObjectName("verificationPanel")
+        panel.setStyleSheet("""
+            QFrame#verificationPanel {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925,
+                    stop:1 #090e16
+                );
+                border:1px solid rgba(255,255,255,28);
+                border-radius:20px;
+            }
+            QFrame#verificationPanel QLabel {
+                border:none;
+                background:transparent;
+            }
+        """)
+        self.apply_dialog_panel_shadow(panel)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+
+        title = QLabel("VERIFICÁ TU CORREO")
+        title.setStyleSheet(
+            "color:#f4f6fb;font-size:16px;font-weight:850;"
+        )
+
+        close_button = QPushButton("×")
+        close_button.setFixedSize(32, 32)
+        close_button.setCursor(Qt.PointingHandCursor)
+        close_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(255,255,255,8);
+                color:#98a1b2;
+                border:1px solid rgba(255,255,255,16);
+                border-radius:9px;
+                font-size:19px;
+                padding:0;
+            }
+            QPushButton:hover {
+                color:#ff8090;
+                background:rgba(255,92,108,25);
+            }
+        """)
+        close_button.clicked.connect(dialog.reject)
+
+        header.addWidget(title, 1)
+        header.addWidget(close_button)
+
+        description = QLabel(
+            "Enviamos un código de 6 dígitos a:\n"
+            f"{email}\n\n"
+            "Revisá también la carpeta de spam."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "color:#929caf;font-size:10px;"
+        )
+
+        code_input = self.auth_input(
+            "Código de 6 dígitos"
+        )
+        code_input.setMaxLength(6)
+        code_input.setAlignment(Qt.AlignCenter)
+
+        message = QLabel()
+        message.setWordWrap(True)
+        message.setStyleSheet(
+            "color:#f5bf57;font-size:9px;"
+        )
+
+        verify_button = self.auth_action_button(
+            "Verificar y entrar"
+        )
+
+        resend_button = QPushButton(
+            "Reenviar código"
+        )
+        resend_button.setFixedHeight(38)
+        resend_button.setCursor(Qt.PointingHandCursor)
+        resend_button.setStyleSheet("""
+            QPushButton {
+                background:rgba(108,99,255,18);
+                color:#b4afff;
+                border:1px solid rgba(126,116,255,55);
+                border-radius:10px;
+                font-size:10px;
+                font-weight:800;
+            }
+            QPushButton:hover {
+                background:rgba(108,99,255,36);
+                color:#ffffff;
+                border-color:rgba(146,137,255,120);
+            }
+            QPushButton:disabled {
+                color:#687084;
+                background:#151a24;
+                border-color:rgba(255,255,255,12);
+            }
+        """)
+
+        def verify():
+            code = code_input.text().strip()
+
+            if len(code) != 6 or not code.isdigit():
+                message.setText(
+                    "Ingresá los 6 números del código."
+                )
+                return
+
+            verify_button.setEnabled(False)
+            verify_button.setText("Verificando...")
+            message.clear()
+
+            def success(payload):
+                self.apply_auth_response(payload)
+                dialog.accept()
+
+                if parent_dialog is not None:
+                    try:
+                        parent_dialog.accept()
+                    except RuntimeError:
+                        pass
+
+            def failure(error):
+                message.setText(error)
+
+            def completed():
+                verify_button.setEnabled(True)
+                verify_button.setText(
+                    "Verificar y entrar"
+                )
+
+            self.run_account_api(
+                "POST",
+                "/auth/verify-email",
+                json_payload={
+                    "email": email,
+                    "code": code,
+                },
+                timeout=12,
+                on_success=success,
+                on_failure=failure,
+                on_completed=completed,
+            )
+
+        def resend():
+            resend_button.setEnabled(False)
+            resend_button.setText("Enviando...")
+            message.clear()
+
+            def success(payload):
+                message.setText(
+                    payload.get(
+                        "message",
+                        "Código reenviado."
+                    )
+                )
+
+            def failure(error):
+                message.setText(error)
+
+            def completed():
+                resend_button.setEnabled(True)
+                resend_button.setText(
+                    "Reenviar código"
+                )
+
+            self.run_account_api(
+                "POST",
+                "/auth/verification/resend",
+                json_payload={"email": email},
+                timeout=12,
+                on_success=success,
+                on_failure=failure,
+                on_completed=completed,
+            )
+
+        verify_button.clicked.connect(verify)
+        code_input.returnPressed.connect(verify)
+        resend_button.clicked.connect(resend)
+
+        layout.addLayout(header)
+        layout.addWidget(description)
+        layout.addSpacing(4)
+        layout.addWidget(code_input)
+        layout.addWidget(message)
+        layout.addStretch()
+        layout.addWidget(verify_button)
+        layout.addWidget(resend_button)
+
+        outer.addWidget(panel)
+        dialog.exec()
+
     def open_auth_dialog(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Cuenta D0cCtor's Hub")
@@ -2682,8 +3563,7 @@ class Launcher(QMainWindow):
 
         if not self.accounts_enabled:
             api_state.setText(
-                "● El sistema de cuentas está desactivado "
-                "temporalmente."
+                "● El sistema de cuentas no está disponible."
             )
             api_state.setStyleSheet(
                 "color:#f5bf57;font-size:9px;"
@@ -2701,16 +3581,15 @@ class Launcher(QMainWindow):
             )
         elif self.account_api_online:
             api_state.setText(
-                f"● API conectada: {self.account_api_url}"
+                "● Servicios de cuenta conectados"
             )
             api_state.setStyleSheet(
                 "color:#55dc7a;font-size:9px;"
             )
         else:
             api_state.setText(
-                "● API sin conexión. El launcher puede seguir "
-                "usándose, pero el registro y el login no estarán "
-                "disponibles."
+                "● Los servicios de cuenta no están disponibles. "
+                "El resto del launcher puede seguir utilizándose."
             )
             api_state.setStyleSheet(
                 "color:#f5bf57;font-size:9px;"
@@ -2846,9 +3725,48 @@ class Launcher(QMainWindow):
         login_button.clicked.connect(perform_login)
         login_password.returnPressed.connect(perform_login)
 
+        verify_pending_button = QPushButton(
+            "¿Ya tenés un código de verificación?"
+        )
+        verify_pending_button.setCursor(
+            Qt.PointingHandCursor
+        )
+        verify_pending_button.setStyleSheet("""
+            QPushButton {
+                color:#9f99ff;
+                background:transparent;
+                border:none;
+                font-size:9px;
+                padding:4px;
+            }
+            QPushButton:hover {
+                color:#c0bcff;
+                text-decoration:underline;
+            }
+        """)
+
+        def open_pending_verification():
+            email = login_email.text().strip()
+
+            if not email:
+                login_error.setText(
+                    "Primero ingresá el correo de la cuenta."
+                )
+                return
+
+            self.open_email_verification_dialog(
+                email,
+                dialog
+            )
+
+        verify_pending_button.clicked.connect(
+            open_pending_verification
+        )
+
         login_layout.addWidget(login_email)
         login_layout.addWidget(login_password)
         login_layout.addWidget(login_error)
+        login_layout.addWidget(verify_pending_button)
         login_layout.addStretch()
         login_layout.addWidget(login_button)
 
@@ -2911,11 +3829,29 @@ class Launcher(QMainWindow):
 
             register_button.setEnabled(False)
             register_button.setText("Creando cuenta...")
+            register_error.setStyleSheet(
+                "color:#ff6674;font-size:10px;"
+            )
             register_error.clear()
 
             def register_success(payload):
-                self.apply_auth_response(payload)
-                dialog.accept()
+                verification_email = payload.get(
+                    "email",
+                    email
+                )
+                register_error.setStyleSheet(
+                    "color:#55dc7a;font-size:10px;"
+                )
+                register_error.setText(
+                    payload.get(
+                        "message",
+                        "Te enviamos un código al correo."
+                    )
+                )
+                self.open_email_verification_dialog(
+                    verification_email,
+                    dialog
+                )
 
             def register_failure(message):
                 register_error.setText(message)
@@ -2956,17 +3892,6 @@ class Launcher(QMainWindow):
             tabs.tabBar().styleSheet()
         )
 
-        configure_api_button = QPushButton(
-            "Configurar dirección de la API"
-        )
-        configure_api_button.setCursor(Qt.PointingHandCursor)
-        configure_api_button.clicked.connect(
-            lambda: (
-                dialog.accept(),
-                self.open_api_configuration_dialog()
-            )
-        )
-
         forgot_password_button = QPushButton("¿Olvidaste tu contraseña?")
         forgot_password_button.setStyleSheet(
             "color:#9f99ff;background:transparent;border:none;font-size:9px;"
@@ -2990,7 +3915,6 @@ class Launcher(QMainWindow):
 
         root.addLayout(tabs_wrapper, 1)
         root.addWidget(forgot_password_button)
-        root.addWidget(configure_api_button)
 
         dialog.exec()
         self.refresh_account_card()
@@ -3005,13 +3929,13 @@ class Launcher(QMainWindow):
         if not self.account_api_online:
             self.show_account_message(
                 "API sin conexión",
-                "Necesitás tener la API conectada para administrar sesiones."
+                "La administración de sesiones no está disponible mientras los servicios estén desconectados."
             )
             return
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Sesiones activas")
-        dialog.setFixedSize(520, 500)
+        dialog.setFixedSize(520, 390)
         dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         dialog.setAttribute(Qt.WA_TranslucentBackground, True)
         dialog.setStyleSheet("QDialog { background:transparent; }")
@@ -3248,7 +4172,7 @@ class Launcher(QMainWindow):
         if not self.account_api_online:
             self.show_account_message(
                 "API sin conexión",
-                "Necesitás tener la API conectada para recuperar la contraseña."
+                "La recuperación no está disponible mientras los servicios estén desconectados."
             )
             return
 
@@ -3357,11 +4281,14 @@ class Launcher(QMainWindow):
                 json_payload={"email": email},
                 timeout=8,
                 on_success=lambda payload: (
-                    code_input.setText(str(payload.get("development_code", ""))),
                     message.setText(
-                        "Modo desarrollo: el código se completó automáticamente. "
-                        "Vence en 10 minutos."
-                    )
+                        payload.get(
+                            "message",
+                            "Si el correo está registrado, "
+                            "te enviamos un código."
+                        )
+                    ),
+                    code_input.setFocus()
                 ),
                 on_failure=lambda error: message.setText(error),
             )
@@ -3400,8 +4327,8 @@ class Launcher(QMainWindow):
 
         layout.addWidget(title)
         recovery_info = QLabel(
-            "Por ahora el código se muestra dentro del launcher porque "
-            "todavía no configuramos el envío de correos."
+            "Te enviaremos un código real al correo registrado. "
+            "El código vence en 10 minutos."
         )
         recovery_info.setWordWrap(True)
         recovery_info.setStyleSheet(
@@ -3523,95 +4450,26 @@ class Launcher(QMainWindow):
         api_layout = QHBoxLayout(api_card)
         api_layout.setContentsMargins(13, 10, 13, 10)
 
-        api_label = QLabel(
-            (
-                "●  API conectada"
-                if self.account_api_online
-                else "●  API offline · sesión local"
-            )
-            + f"\n{self.account_api_url}"
-        )
+        if not self.accounts_enabled:
+            service_text = "●  Cuentas no disponibles"
+            service_color = "#f5bf57"
+        elif self.accounts_maintenance:
+            service_text = "●  Cuentas en mantenimiento"
+            service_color = "#f5bf57"
+        elif self.account_api_online:
+            service_text = "●  Servicios conectados"
+            service_color = "#55dc7a"
+        else:
+            service_text = "●  Servicios sin conexión"
+            service_color = "#f5bf57"
+
+        api_label = QLabel(service_text)
         api_label.setWordWrap(True)
         api_label.setStyleSheet(
-            (
-                "color:#55dc7a;font-size:9px;"
-                if self.account_api_online
-                else "color:#f5bf57;font-size:9px;"
-            )
-        )
-
-        configure_button = QPushButton("CONFIGURAR")
-        configure_button.setCursor(Qt.PointingHandCursor)
-        configure_button.setStyleSheet("""
-            QPushButton {
-                color:#a8a2ff;
-                background:rgba(108,99,255,18);
-                border:1px solid rgba(126,116,255,45);
-                border-radius:9px;
-                padding:7px 10px;
-                font-size:8px;
-                font-weight:850;
-            }
-            QPushButton:hover {
-                background:rgba(108,99,255,32);
-                border-color:rgba(143,133,255,90);
-            }
-        """)
-        configure_button.clicked.connect(
-            lambda: (
-                dialog.accept(),
-                self.open_api_configuration_dialog()
-            )
+            f"color:{service_color};font-size:9px;"
         )
 
         api_layout.addWidget(api_label, 1)
-        api_layout.addWidget(configure_button)
-
-        section_accounts = QLabel("CUENTAS VINCULADAS")
-        section_accounts.setStyleSheet(
-            "color:#747e91;font-size:8px;font-weight:850;"
-            "letter-spacing:1px;"
-        )
-
-        def connection_button(title_text, description, linked, callback):
-            button = QPushButton()
-            button.setFixedHeight(54)
-            button.setCursor(Qt.PointingHandCursor)
-            button.setText(
-                f"{title_text}\n{description}    "
-                + ("VINCULADO" if linked else "VINCULAR")
-            )
-            button.setStyleSheet("""
-                QPushButton {
-                    background:#111923;
-                    color:#dce2ef;
-                    border:1px solid rgba(255,255,255,18);
-                    border-radius:12px;
-                    text-align:left;
-                    padding:7px 14px;
-                    font-size:10px;
-                    font-weight:700;
-                }
-                QPushButton:hover {
-                    border-color:rgba(125,115,255,100);
-                    background:#151e2a;
-                }
-            """)
-            button.clicked.connect(callback)
-            return button
-
-        minecraft_button = connection_button(
-            "Minecraft",
-            "Microsoft / Java Edition",
-            self.account_data.get("minecraft_linked", False),
-            self.prepare_minecraft_link
-        )
-        steam_button = connection_button(
-            "Steam",
-            "Juegos y servidores de Steam",
-            self.account_data.get("steam_linked", False),
-            self.prepare_steam_link
-        )
 
         section_security = QLabel("SEGURIDAD")
         section_security.setStyleSheet(
@@ -3701,11 +4559,7 @@ class Launcher(QMainWindow):
         layout.addLayout(header)
         layout.addSpacing(3)
         layout.addWidget(api_card)
-        layout.addSpacing(4)
-        layout.addWidget(section_accounts)
-        layout.addWidget(minecraft_button)
-        layout.addWidget(steam_button)
-        layout.addSpacing(4)
+        layout.addSpacing(6)
         layout.addWidget(section_security)
         layout.addWidget(change_password_button)
         layout.addWidget(sessions_button)
@@ -3967,11 +4821,26 @@ class Launcher(QMainWindow):
         self.server_status_worker.start()
 
     def update_home_server_status(self, server_name, result):
-        widgets = self.home_server_status_widgets.get(server_name)
-        if not widgets:
+        widget_groups = []
+
+        home_widgets = self.home_server_status_widgets.get(
+            server_name
+        )
+        if home_widgets:
+            widget_groups.append(home_widgets)
+
+        page_widgets = self.servers_page_status_widgets.get(
+            server_name
+        )
+        if page_widgets:
+            widget_groups.append(page_widgets)
+
+        if not widget_groups:
             return
 
-        status = str(result.get("status", "offline")).lower()
+        status = str(
+            result.get("status", "offline")
+        ).lower()
 
         status_styles = {
             "online": ("En línea", "#55dc7a"),
@@ -3984,48 +4853,56 @@ class Launcher(QMainWindow):
             status_styles["offline"]
         )
 
-        widgets["state_dot"].setText("●")
-        widgets["state_dot"].setStyleSheet(
-            f"color:{color};font-size:10px;border:none;"
+        online = int(
+            result.get("players_online", 0) or 0
         )
-        widgets["state_label"].setText(status_text)
-        widgets["state_label"].setStyleSheet(
-            f"color:{color};font-size:10px;font-weight:700;border:none;"
+        maximum = int(
+            result.get("players_max", 0) or 0
         )
-
-        online = int(result.get("players_online", 0) or 0)
-        maximum = int(result.get("players_max", 0) or 0)
-        widgets["players_label"].setText(
-            f"{online}/{maximum}" if maximum > 0 else str(online)
+        players_text = (
+            f"{online}/{maximum}"
+            if maximum > 0
+            else str(online)
         )
 
         ping = result.get("ping")
         if status == "online" and ping is not None:
             ping_value = int(ping)
-
-            if ping_value < 70:
-                ping_color = "#59da72"
-            elif ping_value <= 200:
-                ping_color = "#f5bf57"
-            else:
-                ping_color = "#ff6674"
-
-            widgets["ping_label"].setText(f"{ping_value}ms")
-            widgets["ping_label"].setStyleSheet(
-                f"color:{ping_color};"
-                "font-size:10px;"
-                "font-weight:700;"
-                "border:none;"
+            ping_text = f"{ping_value}ms"
+            ping_color = (
+                "#55dc7a"
+                if ping_value < 70
+                else "#f5bf57"
+                if ping_value <= 200
+                else "#ff6674"
             )
         else:
-            widgets["ping_label"].setText("—")
-            widgets["ping_label"].setStyleSheet(
-                "color:#687286;font-size:10px;border:none;"
+            ping_text = "—"
+            ping_color = "#687286"
+
+        for widgets in widget_groups:
+            widgets["state_dot"].setText("●")
+            widgets["state_dot"].setStyleSheet(
+                f"color:{color};font-size:10px;border:none;"
             )
 
-        detected_version = str(result.get("version", "") or "").strip()
-        if detected_version:
-            widgets["version_label"].setText(detected_version)
+            widgets["state_label"].setText(status_text)
+            widgets["state_label"].setStyleSheet(
+                f"color:{color};font-size:10px;"
+                "font-weight:700;border:none;"
+            )
+
+            widgets["players_label"].setText(
+                players_text
+            )
+
+            widgets["ping_label"].setText(
+                ping_text
+            )
+            widgets["ping_label"].setStyleSheet(
+                f"color:{ping_color};font-size:10px;"
+                "font-weight:700;border:none;"
+            )
 
     def closeEvent(self, event):
         worker = getattr(self, "server_status_worker", None)
@@ -4359,14 +5236,14 @@ class Launcher(QMainWindow):
     # LOGO FLOAT
     # ===============================
     def animate_logo(self):
-        self.float_offset += self.float_direction * 0.3
+        self.float_offset += self.float_direction * 0.18
 
-        if self.float_offset > 8:
+        if self.float_offset > 5:
             self.float_direction = -1
-        elif self.float_offset < -8:
+        elif self.float_offset < -5:
             self.float_direction = 1
 
-        self.logo.move(self.logo.x(), int(30 + self.float_offset))
+        self.logo.set_float_offset(self.float_offset)
         
     # ===============================
     # NEWS CARD REUTILIZABLE
@@ -4427,6 +5304,9 @@ class Launcher(QMainWindow):
         time_text = str(news_item.get("time_ago", "Novedad reciente"))
         likes_value = int(news_item.get("likes", 0) or 0)
         comments_value = int(news_item.get("comments", 0) or 0)
+        news_key, interaction_state = self.get_news_interaction(
+            news_item
+        )
 
         is_event = "EVENTO" in badge_text or "EVENT" in badge_text
         badge_color = "#c58cff" if is_event else "#8580ff"
@@ -4480,45 +5360,92 @@ class Launcher(QMainWindow):
         like_btn = QPushButton()
         like_btn.setCheckable(True)
         like_btn.setCursor(Qt.PointingHandCursor)
-        like_btn.setFixedSize(28, 26)
-        like_btn.setIcon(QIcon(self.make_icon("heart", 14, QColor("#8994aa"))))
-        like_btn.setIconSize(QSize(14, 14))
+        like_btn.setFixedSize(36, 34)
+        like_btn.setIcon(
+            QIcon(
+                self.make_icon(
+                    "heart",
+                    18,
+                    QColor("#8994aa")
+                )
+            )
+        )
+        like_btn.setIconSize(QSize(18, 18))
         like_btn.setToolTip("Me gusta")
         like_btn.setStyleSheet("""
-            QPushButton { background:transparent; border:none; border-radius:8px; }
-            QPushButton:hover { background:rgba(255,255,255,14); }
-            QPushButton:checked { background:rgba(255,86,126,24); }
+            QPushButton {
+                background:transparent;
+                border:none;
+                border-radius:10px;
+            }
+            QPushButton:hover {
+                background:rgba(255,255,255,18);
+            }
+            QPushButton:checked {
+                background:rgba(255,86,126,28);
+            }
         """)
 
         like_count = QLabel(str(likes_value))
-        like_count.setMinimumWidth(24)
-        like_count.setStyleSheet("color:#8c96aa;font-size:9px;border:none;")
+        like_count.setMinimumWidth(26)
+        like_count.setStyleSheet(
+            "color:#9aa4b7;font-size:10px;border:none;"
+        )
 
         def toggle_like(checked):
-            like_btn.setIcon(QIcon(self.make_icon(
-                "heart", 14,
-                QColor("#ff668c") if checked else QColor("#8994aa"),
-                filled=checked
-            )))
-            like_count.setText(str(likes_value + (1 if checked else 0)))
+            self.toggle_news_like(
+                news_item,
+                checked
+            )
 
         like_btn.toggled.connect(toggle_like)
 
         comment_btn = QPushButton()
         comment_btn.setCursor(Qt.PointingHandCursor)
-        comment_btn.setFixedSize(28, 26)
-        comment_btn.setIcon(QIcon(self.make_icon("comment", 14, QColor("#8994aa"))))
-        comment_btn.setIconSize(QSize(14, 14))
+        comment_btn.setFixedSize(36, 34)
+        comment_btn.setIcon(
+            QIcon(
+                self.make_icon(
+                    "comment",
+                    18,
+                    QColor("#8994aa")
+                )
+            )
+        )
+        comment_btn.setIconSize(QSize(18, 18))
         comment_btn.setToolTip("Ver comentarios")
         comment_btn.setStyleSheet("""
-            QPushButton { background:transparent; border:none; border-radius:8px; }
-            QPushButton:hover { background:rgba(255,255,255,14); }
+            QPushButton {
+                background:transparent;
+                border:none;
+                border-radius:10px;
+            }
+            QPushButton:hover {
+                background:rgba(255,255,255,18);
+            }
         """)
-        comment_btn.clicked.connect(lambda checked=False: self.switch_page(2))
+        comment_btn.clicked.connect(
+            lambda checked=False: self.open_news_comments(
+                news_item
+            )
+        )
 
         comment_count = QLabel(str(comments_value))
-        comment_count.setMinimumWidth(24)
-        comment_count.setStyleSheet("color:#8c96aa;font-size:9px;border:none;")
+        comment_count.setMinimumWidth(26)
+        comment_count.setStyleSheet(
+            "color:#9aa4b7;font-size:10px;border:none;"
+        )
+
+        self.register_news_widgets(
+            news_key,
+            like_btn,
+            like_count,
+            comment_count
+        )
+        self.refresh_news_interaction_widgets(
+            news_key,
+            news_item
+        )
 
         open_btn = QPushButton()
         open_btn.setCursor(Qt.PointingHandCursor)
@@ -5054,74 +5981,136 @@ class Launcher(QMainWindow):
     # SERVERS PAGE
     # ===============================
     def create_servers_page(self):
+        self.servers_page_status_widgets = {}
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # 👇 scrollbar izquierda (igual que noticias)
-        scroll.setLayoutDirection(Qt.RightToLeft)
-
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarAlwaysOff
+        )
         scroll.setStyleSheet("""
             QScrollArea {
-                border: none;
+                border:none;
+                background:transparent;
             }
-
             QScrollBar:vertical {
-                background: rgba(255,255,255,0.06);
-                width: 12px;
-                margin: 5px 0px 5px 4px;
-                border-radius: 6px;
+                background:rgba(255,255,255,8);
+                width:9px;
+                margin:6px 1px;
+                border-radius:4px;
             }
-
             QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.35);
-                border-radius: 6px;
-                min-height: 40px;
+                background:rgba(126,116,255,85);
+                border-radius:4px;
+                min-height:38px;
             }
-
             QScrollBar::handle:vertical:hover {
-                background: rgba(255,255,255,0.55);
+                background:rgba(126,116,255,135);
             }
-
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: none;
+                height:0;
             }
         """)
 
         container = QWidget()
-
-        # 👇 esto hace que el contenido vuelva a la normalidad
-        container.setLayoutDirection(Qt.LeftToRight)
+        container.setMinimumWidth(0)
 
         layout = QVBoxLayout(container)
-        layout.setSpacing(20)
-        layout.setContentsMargins(100, 20, 40, 30)
+        layout.setContentsMargins(40, 20, 40, 32)
+        layout.setSpacing(18)
+        layout.setAlignment(Qt.AlignTop)
 
-        title = QLabel("Servidores Disponibles")
-        title.setFont(QFont(self.montserrat, 16))
-        title.setStyleSheet("color: white;")
-        layout.addWidget(title)
+        header_card = QFrame()
+        header_card.setObjectName("serversPageHeader")
+        header_card.setStyleSheet("""
+            QFrame#serversPageHeader {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #131b2a,
+                    stop:1 #0d1420
+                );
+                border:1px solid rgba(91,108,255,55);
+                border-radius:16px;
+            }
+        """)
+
+        header_layout = QHBoxLayout(header_card)
+        header_layout.setContentsMargins(20, 17, 20, 17)
+        header_layout.setSpacing(14)
+
+        icon = QLabel()
+        icon.setFixedSize(46, 46)
+        icon.setPixmap(
+            self.get_svg_icon(
+                "servers",
+                25,
+                "#918aff"
+            ).pixmap(25, 25)
+        )
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setStyleSheet("""
+            background:rgba(126,116,255,18);
+            border:1px solid rgba(126,116,255,50);
+            border-radius:13px;
+        """)
+
+        texts = QVBoxLayout()
+        texts.setSpacing(3)
+
+        title = QLabel("SERVIDORES DE LA COMUNIDAD")
+        title.setFont(
+            QFont(
+                self.montserrat,
+                17,
+                QFont.Weight.Bold
+            )
+        )
+        title.setStyleSheet(
+            "color:#f3f5fb;letter-spacing:1px;border:none;"
+        )
 
         description = QLabel(
-            "Conectate a nuestros servidores oficiales.\n"
-            "Modpacks optimizados y soporte activo."
+            "Elegí una experiencia, instalala y entrá directamente "
+            "desde D0cCtor's Hub."
         )
-        description.setStyleSheet("color: #aaaaaa;")
-        layout.addWidget(description)
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "color:#96a1b6;font-size:11px;border:none;"
+        )
 
-        layout.addSpacing(20)
+        texts.addWidget(title)
+        texts.addWidget(description)
+
+        header_layout.addWidget(icon)
+        header_layout.addLayout(texts, 1)
+        layout.addWidget(header_card)
+
+        info_row = QHBoxLayout()
+        info_row.setSpacing(10)
+
+        available = QLabel(
+            f"{len(self.servers_data)} servidores disponibles"
+        )
+        available.setStyleSheet("""
+            color:#aaa5ff;
+            background:rgba(126,116,255,16);
+            border:1px solid rgba(126,116,255,40);
+            border-radius:9px;
+            padding:7px 10px;
+            font-size:10px;
+            font-weight:750;
+        """)
+
+        info_row.addWidget(available)
+        info_row.addStretch()
+        layout.addLayout(info_row)
 
         for server_name, data in self.servers_data.items():
-
-            pixmap = self.get_remote_pixmap(data.get("image_url"))
+            pixmap = self.get_remote_pixmap(
+                data.get("image_url")
+            )
 
             card = ServerCard(
                 server_name,
@@ -5130,17 +6119,26 @@ class Launcher(QMainWindow):
                 pixmap,
                 data.get("installed", False),
                 self.handle_server_action,
-                large=True
+                large=True,
+                server_data=data
             )
+            card.setSizePolicy(
+                QSizePolicy.Expanding,
+                QSizePolicy.Fixed
+            )
+
+            status_widgets = card.status_widgets()
+            if status_widgets:
+                self.servers_page_status_widgets[
+                    server_name
+                ] = status_widgets
 
             layout.addWidget(card)
 
         layout.addStretch()
-
         scroll.setWidget(container)
-
         return scroll
-        
+
     def create_server_big_card(self, server_name, data):
 
         card = QFrame()
@@ -5399,10 +6397,58 @@ class Launcher(QMainWindow):
         ])
         self.ram_selector.setStyleSheet("""
             QComboBox {
-                background-color: #2a2a38;
-                color: white;
-                border-radius: 8px;
-                padding: 5px;
+                background:#151d29;
+                color:#f1f3f8;
+                border:1px solid rgba(255,255,255,24);
+                border-radius:9px;
+                padding:7px 11px;
+                min-height:25px;
+                font-size:10px;
+            }
+            QComboBox:hover {
+                border-color:rgba(126,116,255,90);
+            }
+            QComboBox:focus {
+                border-color:rgba(126,116,255,155);
+            }
+            QComboBox::drop-down {
+                width:30px;
+                border:none;
+                background:transparent;
+            }
+            QComboBox::down-arrow {
+                image:none;
+                width:0;
+                height:0;
+                border-left:5px solid transparent;
+                border-right:5px solid transparent;
+                border-top:6px solid #a8b0c1;
+                margin-right:10px;
+            }
+            QComboBox QAbstractItemView {
+                background:#111925;
+                color:#eef1f7;
+                border:1px solid rgba(126,116,255,90);
+                border-radius:8px;
+                padding:5px;
+                outline:0;
+                selection-background-color:#625ae6;
+                selection-color:white;
+            }
+            QComboBox QAbstractItemView::item {
+                background:#111925;
+                color:#eef1f7;
+                min-height:34px;
+                padding:5px 10px;
+                border:none;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background:#202b3b;
+                color:white;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background:#625ae6;
+                color:white;
             }
         """)
 
@@ -5525,58 +6571,160 @@ class Launcher(QMainWindow):
         page = QWidget()
         main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(40, 20, 40, 30)
+        main_layout.setSpacing(18)
+        main_layout.setAlignment(Qt.AlignTop)
 
-        main_layout.addStretch()
-
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
+        header_card = QFrame()
+        header_card.setObjectName("storeHeader")
+        header_card.setStyleSheet("""
+            QFrame#storeHeader {
                 background:qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #111826,
-                    stop:1 #0b121d
+                    x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #131b2a,
+                    stop:1 #0d1420
                 );
-                border:1px solid rgba(255,255,255,22);
+                border:1px solid rgba(91,108,255,55);
+                border-radius:16px;
+            }
+        """)
+
+        header_layout = QHBoxLayout(header_card)
+        header_layout.setContentsMargins(20, 17, 20, 17)
+        header_layout.setSpacing(14)
+
+        icon = QLabel()
+        icon.setFixedSize(46, 46)
+        icon.setPixmap(
+            self.get_svg_icon(
+                "store",
+                25,
+                "#918aff"
+            ).pixmap(25, 25)
+        )
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setStyleSheet("""
+            background:rgba(126,116,255,18);
+            border:1px solid rgba(126,116,255,50);
+            border-radius:13px;
+        """)
+
+        texts = QVBoxLayout()
+        texts.setSpacing(3)
+
+        title = QLabel("TIENDA DE LA COMUNIDAD")
+        title.setFont(
+            QFont(
+                self.montserrat,
+                17,
+                QFont.Weight.Bold
+            )
+        )
+        title.setStyleSheet(
+            "color:#f3f5fb;letter-spacing:1px;border:none;"
+        )
+
+        subtitle = QLabel(
+            "Cosméticos, rangos y extras para personalizar "
+            "tu experiencia."
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(
+            "color:#96a1b6;font-size:11px;border:none;"
+        )
+
+        texts.addWidget(title)
+        texts.addWidget(subtitle)
+
+        header_layout.addWidget(icon)
+        header_layout.addLayout(texts, 1)
+        main_layout.addWidget(header_card)
+
+        empty_card = QFrame()
+        empty_card.setObjectName("storeEmptyCard")
+        empty_card.setMinimumHeight(300)
+        empty_card.setStyleSheet("""
+            QFrame#storeEmptyCard {
+                background:qlineargradient(
+                    x1:0,y1:0,x2:1,y2:1,
+                    stop:0 #111925,
+                    stop:1 #0a1019
+                );
+                border:1px solid rgba(255,255,255,18);
                 border-radius:18px;
             }
         """)
 
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(32, 32, 32, 32)
-        card_layout.setSpacing(14)
-        card_layout.setAlignment(Qt.AlignCenter)
+        empty_layout = QVBoxLayout(empty_card)
+        empty_layout.setContentsMargins(32, 32, 32, 32)
+        empty_layout.setSpacing(12)
+        empty_layout.setAlignment(Qt.AlignCenter)
 
-        icon = QLabel()
-        icon.setFixedSize(68, 68)
-        icon.setPixmap(self.make_icon("store", 36, QColor("#7a83ff")))
-        icon.setAlignment(Qt.AlignCenter)
-        icon.setStyleSheet("""
-            background:rgba(122,131,255,0.10);
-            border:1px solid rgba(122,131,255,0.22);
-            border-radius:18px;
+        bag = QLabel()
+        bag.setFixedSize(76, 76)
+        bag.setPixmap(
+            self.get_svg_icon(
+                "store",
+                39,
+                "#918aff"
+            ).pixmap(39, 39)
+        )
+        bag.setAlignment(Qt.AlignCenter)
+        bag.setStyleSheet("""
+            background:rgba(126,116,255,18);
+            border:1px solid rgba(126,116,255,48);
+            border-radius:21px;
         """)
 
-        title = QLabel("Tienda próximamente")
-        title.setFont(QFont(self.montserrat, 20, QFont.Weight.Bold))
-        title.setStyleSheet("color:white;border:none;")
-        title.setAlignment(Qt.AlignCenter)
+        empty_title = QLabel("Todavía no hay artículos")
+        empty_title.setFont(
+            QFont(
+                self.montserrat,
+                18,
+                QFont.Weight.Bold
+            )
+        )
+        empty_title.setAlignment(Qt.AlignCenter)
+        empty_title.setStyleSheet(
+            "color:#f3f5fb;border:none;"
+        )
 
         desc = QLabel(
-            "Esta sección va a quedar preparada para cosméticos, rangos y otros extras.\n"
-            "Por ahora la dejamos con la misma línea visual del launcher."
+            "La tienda está preparada y va a mostrar acá "
+            "los próximos cosméticos, rangos y paquetes."
         )
+        desc.setMaximumWidth(520)
         desc.setWordWrap(True)
-        desc.setMaximumWidth(560)
         desc.setAlignment(Qt.AlignCenter)
-        desc.setStyleSheet("color:#9aa6bc;font-size:12px;border:none;")
+        desc.setStyleSheet(
+            "color:#9aa6bc;font-size:11px;border:none;"
+        )
 
-        card_layout.addWidget(icon)
-        card_layout.addWidget(title)
-        card_layout.addWidget(desc)
+        badge = QLabel("PRÓXIMAMENTE")
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setStyleSheet("""
+            color:#aaa5ff;
+            background:rgba(126,116,255,18);
+            border:1px solid rgba(126,116,255,48);
+            border-radius:9px;
+            padding:7px 12px;
+            font-size:9px;
+            font-weight:850;
+        """)
 
-        main_layout.addWidget(card)
-        main_layout.addStretch()
+        empty_layout.addWidget(
+            bag,
+            0,
+            Qt.AlignHCenter
+        )
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(desc)
+        empty_layout.addSpacing(4)
+        empty_layout.addWidget(
+            badge,
+            alignment=Qt.AlignCenter
+        )
 
+        main_layout.addWidget(empty_card, 1)
         return page
 
     def handle_server_action(self, server_name):

@@ -1,28 +1,23 @@
 {
   "servers": [
     {
-      "id": "ShibuyaSMP",
-      "name": "ShibuyaSMP",
-      "profile_name": "ShibuyaSMP",
-      "description": "Un survival multijugador clásico con economía, protección de terrenos y comandos útiles. Construí, comerciá y progresá junto a la comunidad.",
-      "minecraft_version": "1.21.10",
-      "loader": "fabric",
+      "id": "WoW-WotLK",
+      "name": "World of Warcraft",
+      "description": "Wrath of the Lich King 3.3.5a con PlayerBots, progresión x3 y addons preconfigurados.",
+      "type": "wow",
+      "version": "3.3.5a",
+      "client_version": "1.0",
+      "addons_version": "1.0",
       "maintenance": false,
-      "loader_version": "0.18.4",
-      "modpack_version": "2.0",
-      "server_ip": "best.mysticmc.co",
-      "recommended_ram": "8 GB",
-      "modpack_url": "https://github.com/D0cCto0r/d0cctors-hub/releases/download/ShibuyaSMP-Modpack-1.0/ShibuyaSMPModpack.zip",
-      "image_url": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/minecraft.png"
-    },
-    {
-      "id": "Ark SE Scorched",
-      "name": "Ark Survival",
-      "description": "Avanzá por la historia principal, domá criaturas únicas del desierto y sobreviví junto a otros jugadores en un mundo hostil lleno de desafíos.",
-      "type": "steam",
-      "steam_appid": "346110",
-      "workshop_collection": "https://steamcommunity.com/sharedfiles/filedetails/?id=3463572696",
-      "image_url": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/ark.png"
+
+      "client_url": "",
+      "addons_url": "",
+      "realmlist": "",
+      "realmlist_path": "Data/esES/realmlist.wtf",
+
+      "image_url": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/wow.png",
+
+      "players_max": 0
     }
   ]
 }

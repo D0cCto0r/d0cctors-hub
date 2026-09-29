@@ -9,14 +9,11 @@
       "client_version": "1.0",
       "addons_version": "1.0",
       "maintenance": false,
-
       "client_url": "",
       "addons_url": "",
-      "realmlist": "",
-      "realmlist_path": "Data/esES/realmlist.wtf",
-
+      "realmlist": "d0chub.ddns.net",
+      "realmlist_path": "Data/esMX/realmlist.wtf",
       "image_url": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/wow.png",
-
       "players_max": 0
     }
   ]

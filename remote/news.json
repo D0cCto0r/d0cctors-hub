@@ -1,14 +1,25 @@
 {
   "news": [
     {
-      "title": "Lanzamiento del Launcher Oficial",
-      "description": "Instalá servidores, recibí noticias y mantené tus juegos actualizados desde una sola aplicación diseñada para la comunidad.",
-      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/news_bg.png"
+      "title": "¡World of Warcraft ya está abierto!",
+      "description": "Nuestro servidor de Wrath of the Lich King 3.3.5a ya está disponible. Descargá el cliente directamente desde D0cCtor's Hub y entrá a jugar con addons preconfigurados, progresión x3, transfiguración y un mundo lleno de PlayerBots.",
+      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/wowLK.png"
     },
     {
-      "title": "ARK: Scorched Earth Próximamente",
-      "description": "Muy pronto abriremos nuestro nuevo servidor de ARK en el mapa Scorched Earth.",
+      "title": "ARK: Aberration — En pausa temporal",
+      "description": "La partida de Aberration queda temporalmente en standby. El servidor podrá retomarse más adelante cuando la comunidad quiera volver para continuar y completar el mapa.",
+      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/arkAB.png"
+    },
+    {
+      "title": "ARK: Scorched Earth — Temporada finalizada",
+      "description": "La aventura en Scorched Earth llegó a su fin. La comunidad derrotó a la Manticora, el jefe final del mapa, cerrando oficialmente esta temporada de nuestro servidor de ARK.",
+      "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/arkSE.png"
+    },
+    {
+      "title": "¡Nuevo launcher oficial disponible!",
+      "description": "D0cCtor's Hub ya está disponible como launcher oficial de la comunidad. Desde una sola aplicación podés acceder a nuestros servidores, recibir noticias, mantener tus juegos actualizados y descargar todo lo necesario para jugar.",
       "image": "https://raw.githubusercontent.com/D0cCto0r/d0cctors-hub/main/remote/assets/news_bg.png"
     }
   ]
+}
 }

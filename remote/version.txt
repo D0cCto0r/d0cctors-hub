@@ -1,2 +1,2 @@
 1.0-2026.10.2
-https://github.com/D0cCto0r/d0cctors-hub/releases/download/v1.0-2026.10.2-test/launcher.exe
+https://github.com/D0cCto0r/d0cctors-hub/releases/download/v1.0-2026.10.2/launcher.exe

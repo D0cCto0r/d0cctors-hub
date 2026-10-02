@@ -1,2 +1,2 @@
-1.0-2026.10.7
+1.0-2026.10.9
 https://github.com/D0cCto0r/d0cctors-hub/releases/download/v1.0-2026.10.7/D0cCtorHub.exe
